@@ -216,7 +216,10 @@ def _register(client: TestClient, base_url: str = "http://svc") -> None:
 def _drive_to_terminal(client: TestClient, body: dict[str, object]) -> dict[str, Any]:
     gid = client.post("/api/games", json=body).json()["id"]
     snap: dict[str, Any] = {}
-    for _ in range(200):
+    # Wall-clock deadline, not a poll count: loaded CI runners need far
+    # longer than a dev machine to drive a full game.
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
         snap = client.get(f"/api/games/{gid}").json()
         if snap["status"]["terminal"]:
             break
