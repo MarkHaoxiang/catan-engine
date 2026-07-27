@@ -17,10 +17,20 @@ from fastapi.testclient import TestClient
 from settlrl_agents.service.app import create_app as create_bot_app
 from settlrl_agents.service.bots import BUNDLED, make_bot
 from settlrl_app.bots.providers import ProviderRegistry, RemoteBotProvider
+from settlrl_game.session import GameSession
 
 # The bot kinds the in-process services offer (used as ``external_kinds`` when a
 # test constructs a GameSession with bot seats directly).
 BOT_KINDS = frozenset(BUNDLED)
+
+
+def play_out(session: GameSession) -> None:
+    """Random legal moves until the game ends (a fast terminal position) --
+    direct in-process stepping, no wall clock or HTTP driver involved."""
+    for _ in range(50_000):
+        if session.auto_step() is None:
+            return
+    raise AssertionError("game did not terminate")
 
 
 def start_game(

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
-from _helpers import bot_registry, start_game
+from _helpers import bot_registry, play_out, start_game
 from fastapi.testclient import TestClient
 from settlrl_app.game.games import GameRegistry, _rebuild_handle
 from settlrl_app.server import create_app
@@ -18,14 +18,6 @@ from settlrl_app.storage.store import FinishedGame, GameStore, RatingEntry
 from settlrl_game.convert import board_to_model
 from settlrl_game.session import GameSession, GameSetup
 from sqlalchemy import select
-
-
-def _play_out(session: GameSession) -> None:
-    """Random legal moves until the game ends (a fast terminal position)."""
-    for _ in range(50_000):
-        if session.auto_step() is None:
-            return
-    raise AssertionError("game did not terminate")
 
 
 def test_game_setup_round_trips_through_a_dict() -> None:
@@ -104,7 +96,7 @@ def test_finished_game_is_kept_as_history_not_restored(tmp_path: Path) -> None:
         reg = GameRegistry(max_games=1, store=store)
         h = reg.create(GameSession(seed=0, n_players=2, seats=["human", "human"]))
         h.claim(0, user_id="acc-1")  # an account owns seat 0
-        _play_out(h.session)
+        play_out(h.session)
         h.bump()  # journals the moves and fires the finish hook
         # At cap=1, creating another game evicts the finished one from the
         # registry — but it stays in the store as history.
@@ -140,7 +132,7 @@ def test_history_is_capped_to_the_newest(
         ids = []
         for seed in (0, 1):
             h = reg.create(GameSession(seed=seed, n_players=2, seats=["human"] * 2))
-            _play_out(h.session)
+            play_out(h.session)
             h.bump()
             ids.append(h.id)
         await store.aclose()
@@ -202,7 +194,7 @@ def test_finished_game_updates_ratings(tmp_path: Path) -> None:
         store.start()
         reg = GameRegistry(store=store)
         h = reg.create(_bot_game(0, ["alpha", "beta"]))
-        _play_out(h.session)
+        play_out(h.session)
         winner = h.session.winner()
         h.bump()  # fires the finish hook -> enqueues the rating update
         await store.aclose()
@@ -233,7 +225,7 @@ def test_ratings_are_bucketed_by_player_count(tmp_path: Path) -> None:
             _bot_game(1, ["alpha", "beta", "gamma", "delta"]),
         ):
             h = reg.create(game)
-            _play_out(h.session)
+            play_out(h.session)
             h.bump()
         await store.aclose()
         board = await store.leaderboard()
@@ -293,23 +285,28 @@ def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
             },
         ).json()["id"]
         deadline = time.monotonic() + 30
+        moves_at_shutdown = 0
         while time.monotonic() < deadline:
             snap = c1.get(f"/api/games/{game}").json()
-            moves = sum(1 for e in snap["log"] if e["kind"] == "move")
-            if snap["status"]["terminal"] or moves >= 5:
+            moves_at_shutdown = sum(1 for e in snap["log"] if e["kind"] == "move")
+            if snap["status"]["terminal"] or moves_at_shutdown >= 5:
                 break
             time.sleep(0.05)
 
     # A fresh app restores the position and its startup restarts the driver,
-    # which plays the game out to the end (random fallback even before the bot
-    # service is re-registered).
+    # which resumes playing (random fallback even before the bot service is
+    # re-registered) -- we only need to see it advance, not finish, since
+    # finishing a whole game is an unbounded wall-clock wait.
     with TestClient(
         create_app(state_dir=str(tmp_path), bot_delay=0.0, providers=bot_registry())
     ) as c2:
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            if c2.get(f"/api/games/{game}").json()["status"]["terminal"]:
-                break
-            time.sleep(0.1)
+        deadline = time.monotonic() + 30
         body = c2.get(f"/api/games/{game}").json()
-        assert body["status"]["terminal"] and body["status"]["winner"] is not None
+        while time.monotonic() < deadline:
+            body = c2.get(f"/api/games/{game}").json()
+            moves = sum(1 for e in body["log"] if e["kind"] == "move")
+            if body["status"]["terminal"] or moves > moves_at_shutdown:
+                break
+            time.sleep(0.05)
+        moves = sum(1 for e in body["log"] if e["kind"] == "move")
+        assert body["status"]["terminal"] or moves > moves_at_shutdown

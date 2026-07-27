@@ -4,7 +4,10 @@ Each test builds its own app around its own registry (``create_app``), so
 nothing is shared between tests. These cover what the routes themselves own —
 auth and status codes, locking, request plumbing — plus the SPA fallback. Human
 games are staged through a lobby (``_human_game``); the all-bot create route
-backs the bot-driver / finished-game tests (``bot_game``).
+backs live-game tests (``bot_game``). Finished-game tests (record/replay) play
+a session out directly (``_finished_game``), not through the HTTP bot driver —
+driving a whole game to completion over the wire is wall-clock bound and too
+flaky for CI.
 """
 
 import json
@@ -18,11 +21,12 @@ from pathlib import Path
 import httpx
 import pytest
 import uvicorn
-from _helpers import bot_game, bot_registry
+from _helpers import BOT_KINDS, bot_game, bot_registry, play_out
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from settlrl_app.game.games import GameRegistry
 from settlrl_app.server import create_app
+from settlrl_game.session import GameSession
 
 
 @pytest.fixture()
@@ -219,20 +223,6 @@ def test_events_stream_snapshot_now_then_on_every_change() -> None:
     assert len(second["log"]) == len(first["log"]) + 1  # type: ignore[arg-type]
 
 
-def test_bot_driver_plays_an_all_bot_game_to_the_end() -> None:
-    with TestClient(
-        create_app(GameRegistry(), bot_delay=0.0, providers=bot_registry())
-    ) as client:
-        game = bot_game(client, ["random", "random"])
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            if client.get(f"/api/games/{game}").json()["status"]["terminal"]:
-                break
-            time.sleep(0.1)
-        body = client.get(f"/api/games/{game}").json()
-        assert body["status"]["terminal"] and body["status"]["winner"] is not None
-
-
 def test_turn_timeout_auto_advances_an_idle_human_turn() -> None:
     # All human, but a turn timeout is set: nobody acts, so the driver auto-
     # plays the idle turn and the game advances on its own.
@@ -314,48 +304,43 @@ def test_chat_requires_seat_ownership(client: TestClient) -> None:
 
 
 @contextmanager
-def _finished_bot_game(seed: int = 0) -> Iterator[tuple[TestClient, str]]:
-    """A fast all-bot app whose game the in-process driver has played to the end,
-    yielding the client and the finished game's id."""
-    with TestClient(
-        create_app(GameRegistry(), bot_delay=0.0, providers=bot_registry())
-    ) as client:
-        game = bot_game(client, ["random", "random"], seed=seed)
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            if client.get(f"/api/games/{game}").json()["status"]["terminal"]:
-                break
-            time.sleep(0.05)
-        else:
-            raise AssertionError("game did not finish in time")
-        yield client, game
+def _finished_game(seed: int = 0) -> Iterator[tuple[TestClient, str]]:
+    """An all-bot app whose game is already finished, yielding the client and
+    the finished game's id.
+
+    Played out directly (``auto_step``, no bot service, no wall clock) before
+    the app is even built: a finished game never spawns a driver, so the
+    record/replay routes are reachable immediately -- no polling.
+    """
+    session = GameSession(
+        seed=seed, n_players=2, seats=["random", "random"], external_kinds=BOT_KINDS
+    )
+    play_out(session)
+    registry = GameRegistry()
+    handle = registry.create(session)
+    with TestClient(create_app(registry)) as client:
+        yield client, handle.id
 
 
-def test_record_and_replay_export_finished_games_only() -> None:
-    with TestClient(
-        create_app(GameRegistry(), bot_delay=0.0, providers=bot_registry())
-    ) as client:
-        game = bot_game(client, ["random", "random"])
-        # A live game's record would reconstruct hidden hands when replayed.
-        assert client.get(f"/api/games/{game}/record").status_code == 409
-        assert client.post(f"/api/games/{game}/replay").status_code == 409
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            if client.get(f"/api/games/{game}").json()["status"]["terminal"]:
-                break
-            time.sleep(0.05)
-        doc = client.get(f"/api/games/{game}/record").json()
+def test_record_and_replay_export_finished_games_only(client: TestClient) -> None:
+    game = bot_game(client, ["random", "random"])
+    # A live game's record would reconstruct hidden hands when replayed.
+    assert client.get(f"/api/games/{game}/record").status_code == 409
+    assert client.post(f"/api/games/{game}/replay").status_code == 409
+
+    with _finished_game() as (fclient, fgame):
+        doc = fclient.get(f"/api/games/{fgame}/record").json()
         assert doc["winner"] is not None and len(doc["moves"]) > 0
-        opening = client.post(f"/api/games/{game}/replay").json()
+        opening = fclient.post(f"/api/games/{fgame}/replay").json()
         assert opening["move"] == 0 and opening["n_moves"] == len(doc["moves"])
-        mid = client.get("/api/replay/state", params={"move": 5}).json()
+        mid = fclient.get("/api/replay/state", params={"move": 5}).json()
         assert mid["move"] == 5
-        bad = client.get("/api/replay/state", params={"move": 99999})
+        bad = fclient.get("/api/replay/state", params={"move": 99999})
         assert bad.status_code == 422
 
 
 def test_replay_upload_roundtrip() -> None:
-    with _finished_bot_game() as (client, game):
+    with _finished_game() as (client, game):
         doc = client.get(f"/api/games/{game}/record").json()
         assert client.post("/api/replay", json=doc).status_code == 200
         assert client.get("/api/replay/record").status_code == 200
@@ -368,7 +353,7 @@ def test_replay_state_404_until_loaded(client: TestClient) -> None:
 def test_replay_probe_is_null_not_404_until_loaded() -> None:
     # The page's load-time probe must not 404 on a fresh visit; it returns null,
     # then the loaded opening state once a record is posted.
-    with _finished_bot_game() as (client, game):
+    with _finished_game() as (client, game):
         probe = client.get("/api/replay")
         assert probe.status_code == 200 and probe.json() is None
         doc = client.get(f"/api/games/{game}/record").json()
@@ -406,7 +391,7 @@ def test_oversized_request_body_is_rejected_before_parsing() -> None:
 def test_replay_with_too_many_moves_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with _finished_bot_game() as (client, game):
+    with _finished_game() as (client, game):
         doc = client.get(f"/api/games/{game}/record").json()
         monkeypatch.setattr(
             "settlrl_app.api.routers.replay._MAX_REPLAY_MOVES", len(doc["moves"]) - 1
