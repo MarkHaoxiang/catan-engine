@@ -78,3 +78,20 @@ def test_0004_scale_presets_compose() -> None:
         assert cfg.selfplay.samples == 16384 and cfg.optim.batch_size == 1024
         assert cfg.value_blend.max == 0.85 and cfg.optim.grad_clip == 1.0
         assert cfg.arena.every == 10 and cfg.arena.sims == 24
+
+
+def test_0004_anchor_loads_and_forwards() -> None:
+    import jax
+    from settlrl_engine.env import BatchedSettlrlEnv
+    from settlrl_learn.nn.board_gnn import gnn_seams
+
+    anchors = load_run("0004_alphazero", module="anchors")
+    net, netcfg = anchors.load_anchor("az0_gnn96x4")
+    assert (netcfg.width, netcfg.layers, netcfg.head_depth) == (96, 4, 2)
+
+    env = BatchedSettlrlEnv(batch_size=1, n_players=2)
+    layout = jax.tree.map(lambda x: x[0], env.board[0])
+    state = jax.tree.map(lambda x: x[0], env.board[1])
+    value_fn, _ = gnn_seams(net)
+    v = value_fn(layout, state, jax.numpy.int32(0))
+    assert bool(jax.numpy.isfinite(v))

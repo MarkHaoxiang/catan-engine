@@ -46,11 +46,11 @@ for _framework in sorted(EXPERIMENTS.glob("[0-9][0-9][0-9][0-9]_*")):
     sys.path.insert(0, str(_framework))
 
 
-def load_run(framework: str) -> ModuleType:
-    """Import the ``run.py`` of ``experiments/<framework>/`` under a unique name."""
-    path = EXPERIMENTS / framework / "run.py"
-    spec = importlib.util.spec_from_file_location(f"{framework}.run", path)
+def load_run(framework: str, *, module: str = "run") -> ModuleType:
+    """Import ``experiments/<framework>/<module>.py`` under a unique name."""
+    path = EXPERIMENTS / framework / f"{module}.py"
+    spec = importlib.util.spec_from_file_location(f"{framework}.{module}", path)
     assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
