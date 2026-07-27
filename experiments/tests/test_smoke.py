@@ -63,6 +63,24 @@ def test_0004_alphazero_gnn_smoke(tmp_path: Path) -> None:
     _verdict(tmp_path)
 
 
+def test_0004_bench_throughput_smoke(tmp_path: Path) -> None:
+    run = load_run("0004_alphazero")
+    cfg = run.compose_config(
+        [
+            "+experiment=bench_throughput",
+            "selfplay.samples=4",
+            "selfplay.batch=2",
+            "search.num_simulations=2",
+            "bench.repeats=1",
+            "bench.warmup=0",
+        ]
+    )
+    run.run_experiment(Run(tmp_path), cfg)
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["verdict"] == "recorded"
+    assert "samples_per_s" in result
+
+
 def test_0004_scale_presets_compose() -> None:
     # The nano/small/medium budget tiers share one recipe (gnn + warm-up + Canopy
     # q-blend, no chance/EV, B256, sims64) and differ only in budget. Fast guard

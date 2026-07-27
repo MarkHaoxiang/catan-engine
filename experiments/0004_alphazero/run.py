@@ -66,17 +66,27 @@ class WandbConfig(_Sub):
     project: str = "settlrl-0004-alphazero"
 
 
+class BenchConfig(_Sub):
+    """Throughput-bench knobs (mode: bench): the frozen anchor + timing scheme."""
+
+    anchor: str = "az0_gnn96x4"
+    warmup: int = 1
+    repeats: int = 3
+
+
 class AlphaZeroConfig(Config):
     """The experiment schema: the loop's grouped config plus experiment-only
     sections (net architecture, wandb, the gate)."""
 
     seed: int = 0
+    mode: Literal["train", "bench"] = "train"
     n_iterations: int = 20
     checkpoint_every: int = 5
     resume_from: str = ""  # prior run dir to continue bit-exactly (its runstate.eqx)
     gate_winrate: float = 0.55  # pass iff the final net clears this vs lookahead
     net: NetConfig = Field(default_factory=NetConfig)
     wandb: WandbConfig = Field(default_factory=WandbConfig)
+    bench: BenchConfig = Field(default_factory=BenchConfig)
     search: SearchSettings = Field(default_factory=SearchSettings)
     selfplay: SelfPlayConfig = Field(default_factory=SelfPlayConfig)
     optim: OptimConfig = Field(default_factory=OptimConfig)
@@ -173,7 +183,35 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     )
 
 
+def run_bench(run: Run, cfg: AlphaZeroConfig) -> None:
+    """Pinned self-play throughput at a frozen net; verdict is always
+    ``recorded`` -- the comparison is between two runs' result.json."""
+    import jax
+
+    # same-dir sibling module; sys.path already has this dir (script invocation
+    # and the test conftest both put it there), matching 0002/0003's convention.
+    from anchors import load_anchor
+    from settlrl_learn.training import GNNBackend, bench_selfplay
+
+    net, netcfg = load_anchor(cfg.bench.anchor)
+    s = cfg.search
+    backend = GNNBackend(
+        netcfg, setup_depth=cfg.net.setup_depth,
+        setup_temperature=cfg.net.setup_temperature, setup_beam=cfg.net.setup_beam,
+        chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
+    )  # fmt: skip
+    results = bench_selfplay(
+        backend, net, cfg.to_learn_config(),
+        warmup=cfg.bench.warmup, repeats=cfg.bench.repeats, seed=cfg.seed,
+    )  # fmt: skip
+    run.log(**results)
+    run.finish("recorded", device=jax.devices()[0].device_kind, **results)
+
+
 def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
+    if cfg.mode == "bench":
+        run_bench(run, cfg)
+        return
     if cfg.net.kind == "gnn":
         run_gnn_experiment(run, cfg)
         return

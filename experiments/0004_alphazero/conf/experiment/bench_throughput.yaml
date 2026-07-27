@@ -1,0 +1,19 @@
+# @package _global_
+# Pinned self-play throughput benchmark: the overnight training shape at a
+# frozen net (anchors/az0). Compare result.json across commits; never a gate.
+defaults:
+  - override /net: gnn
+net:
+  width: 96
+  layers: 4
+mode: bench
+selfplay:
+  samples: 16384
+  batch: 256
+search:
+  num_simulations: 64
+  max_considered: 16
+  expected_rolls: false
+  chance_nodes: false
+wandb:
+  mode: disabled
