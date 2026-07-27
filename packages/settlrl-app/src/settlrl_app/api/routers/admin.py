@@ -42,7 +42,9 @@ def build(deps: Deps) -> APIRouter:
     @router.get("/api/admin/status")
     def status(_: Annotated[object, Depends(auth.admin_user)]) -> _AdminStatus:
         """Server health for the admin page (superuser only)."""
-        handles = sorted(registry.all_handles(), key=lambda h: h.created_at, reverse=True)
+        handles = sorted(
+            registry.all_handles(), key=lambda h: h.created_at, reverse=True
+        )
         games = [
             _GameSummary(
                 id=h.id,

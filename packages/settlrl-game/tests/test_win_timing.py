@@ -27,7 +27,10 @@ def test_off_turn_ten_vp_claims_at_turn_start() -> None:
     game = make_game(make_layout())  # player 0's MAIN, has_rolled
     _give_ten_vp(game, 1)
     assert game.total_vp(1) == 10
-    assert game.phase is Phase.MAIN  # 10 VP out of turn ends nothing
+    # Phase-typed locals here (and below) keep mypy from narrowing
+    # `game.phase` across the mutating `apply` calls.
+    phase: Phase = game.phase
+    assert phase is Phase.MAIN  # 10 VP out of turn ends nothing
 
     game.apply(EndTurn())  # player 1's turn begins -> they claim
 
@@ -40,7 +43,8 @@ def test_game_continues_until_the_ten_vp_players_turn() -> None:
     _give_ten_vp(game, 2)
 
     game.apply(EndTurn())  # player 1's turn: not the 10-VP player
-    assert game.phase is Phase.ROLL
+    phase: Phase = game.phase
+    assert phase is Phase.ROLL
     assert game.current_player == 1
 
     game.apply(Roll(value=4))  # all-desert layout: no production, no 7
@@ -70,7 +74,8 @@ def test_lower_win_threshold_ends_the_game_sooner() -> None:
     game.victory_points_to_win = 4
     _give_settlements(game, 1, 4)  # exactly the (lowered) threshold
     assert game.total_vp(1) == 4
-    assert game.phase is Phase.MAIN  # at the threshold but out of turn: no win
+    phase: Phase = game.phase
+    assert phase is Phase.MAIN  # at the threshold but out of turn: no win
 
     game.apply(EndTurn())  # player 1's turn begins -> they claim
 

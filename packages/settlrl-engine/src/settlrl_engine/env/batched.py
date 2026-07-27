@@ -437,7 +437,9 @@ class BatchedSettlrlEnv:
             # Reset the category on a turn change (current player moved, or the
             # lane auto-reset); else raise it by a *legal, main-phase* action's
             # category (an illegal / sub-phase action counts as uncategorised).
-            turn_changed = (pre_player != self._state.current_player) | out.terminations.any(-1)
+            turn_changed = (
+                pre_player != self._state.current_player
+            ) | out.terminations.any(-1)
             safe_at = jnp.where(legal & pre_main, at, jnp.int32(ActionType.END_TURN))
             self._category = _next_category_b(self._category, safe_at, turn_changed)
             self._avail = self._avail & _ordering_mask_b(self._state, self._category)

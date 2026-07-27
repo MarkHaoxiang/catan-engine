@@ -142,7 +142,9 @@ def generate(cfg: dict) -> Dataset:
     path = _CACHE / f"{_key(cfg)}-v4.npz"  # -v4: richer per-opponent globals
     if path.exists():
         with np.load(path) as d:
-            samples = Sample(d["nodes"], d["edges"], d["glob"], d["engineered"])  # extra
+            samples = Sample(
+                d["nodes"], d["edges"], d["glob"], d["engineered"]
+            )  # extra
             return Dataset(
                 samples, d["win"], d["heur"], d["road"], d["turns"], d["episode"]
             )
