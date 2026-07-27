@@ -32,9 +32,15 @@ settlrl-engine = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Deselect the throughput benchmarks by default (they dominate wall-clock and
+# aren't correctness tests). Run them with `-m benchmark` or via the
+# repo-root run_benchmarks.sh wrapper.
 # Fixed worker count, not `-n auto`: caps peak memory (one JAX process/core
 # under `auto`). See settlrl-engine's pyproject for the measured rationale.
-addopts = "-n 8"
+addopts = "-n 8 -m 'not benchmark'"
+markers = [
+    "benchmark: throughput benchmark, deselected by default (run with -m benchmark)",
+]
 
 [tool.mypy]
 strict = true

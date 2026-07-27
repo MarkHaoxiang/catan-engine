@@ -172,6 +172,10 @@ deps only because this subpackage uses them.
     `sims_per_s` (`moves_per_s * search.num_simulations`). Rejects
     `pcr_full_prob` < 1 — playout-cap randomization breaks the sims-per-move
     accounting.
+  - `tests/benchmark/` holds the pytest-benchmark suite (net forward, one
+    vmapped search step, `bench_selfplay`'s window, one optimiser step) on a
+    random-init `BoardGNN` — `benchmark`-marked and deselected from the
+    default run; the repo-root `run_benchmarks.sh` re-selects it.
   - `training/mlp_backend.py::MLPBackend` — the `AZParams` net over the
     engineered feature vector; **unmasked** policy CE + value-logistic loss,
     optax adamw, the net plays setup itself.

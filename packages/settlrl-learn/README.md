@@ -38,3 +38,6 @@ shipped path); `experiments/` composes these.
   pydantic / OmegaConf config base) for `experiments/`.
 
 Experiment 0004 composes the training loop; experiment 0003, the architectures.
+
+Micro-benchmarks for the training loop's units live in `tests/benchmark/` —
+see [its README](tests/benchmark/README.md) for how to run them.
