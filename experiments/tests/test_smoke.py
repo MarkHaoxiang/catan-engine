@@ -63,6 +63,7 @@ def test_0004_alphazero_gnn_smoke(tmp_path: Path) -> None:
     _verdict(tmp_path)
 
 
+@pytest.mark.slow
 def test_0004_bench_throughput_smoke(tmp_path: Path) -> None:
     run = load_run("0004_alphazero")
     cfg = run.compose_config(
