@@ -43,7 +43,12 @@ does not pull `pydantic`/`omegaconf`. A framework's *same-dir* helpers (e.g.
 (`conftest.load_run` imports a `run.py` by path; the digit-prefixed dirs
 aren't packages). A smoke asserts only a recorded verdict, never strength.
 Mark a smoke `slow` when JAX recompiles dominate (CI-only; pre-commit runs
-`-m "not slow"`). `mypy_experiments.sh` checks each framework dir separately
+`-m "not slow"`). A smoke variant must shrink **every** budget group: 0004's
+`smoke`/`gnn_smoke` once left `arena` at its production defaults (48 sims, 16
+considered, batch 16, both anchor opponents seat-swapped) while the rest was
+trivial, and the arena then cost 895s of a 907s iteration — the whole reason CI
+never finished the step. Cold-cache cost of the suite on runner-class hardware
+(4 vCPU, `-n 2`) is ~8 minutes; CI caps the step at 25. `mypy_experiments.sh` checks each framework dir separately
 (the `run.py` modules would collide on one invocation) plus `new.py` and the
 tests; the shared harness is checked by the agents package mypy. New
 frameworks: add a `smoke` variant and a `test_<nnnn>_*` case, and the mypy loop

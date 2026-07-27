@@ -139,12 +139,16 @@ def _collect(cfg: dict) -> Dataset:
 
 def generate(cfg: dict) -> Dataset:
     """Collect (or load from ``runs/_cache``) the supervised dataset for ``cfg``."""
-    path = _CACHE / f"{_key(cfg)}-v4.npz"  # -v4: richer per-opponent globals
+    path = _CACHE / f"{_key(cfg)}-v5.npz"  # -v5: per-hex tile features
     if path.exists():
         with np.load(path) as d:
             samples = Sample(
-                d["nodes"], d["edges"], d["glob"], d["engineered"]
-            )  # extra
+                nodes=d["nodes"],
+                edges=d["edges"],
+                glob=d["glob"],
+                tiles=d["tiles"],
+                extra=d["engineered"],
+            )
             return Dataset(
                 samples, d["win"], d["heur"], d["road"], d["turns"], d["episode"]
             )
@@ -154,6 +158,7 @@ def generate(cfg: dict) -> Dataset:
     np.savez(
         path,
         nodes=ds.samples.nodes, edges=ds.samples.edges, glob=ds.samples.glob,
+        tiles=ds.samples.tiles,
         engineered=ds.samples.extra, win=ds.win, heur=ds.heur, road=ds.road,
         turns=ds.turns, episode=ds.episode,
     )  # fmt: skip

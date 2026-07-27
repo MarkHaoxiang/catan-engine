@@ -44,10 +44,15 @@ jobs:
       - run: uv run --package settlrl-agents pytest packages/settlrl-agents/tests
       - run: uv run --package settlrl-learn pytest packages/settlrl-learn/tests
       # Experiment smoke tests (full, including `slow`): exercise every
-      # framework's plumbing end-to-end at trivial budgets. `-n auto` runs the
-      # frameworks' smokes in parallel (each is JIT-compile-bound and otherwise
-      # serial); the wall clock is then the slowest one, not their sum.
-      - run: WANDB_MODE=disabled uv run pytest experiments/tests -n auto
+      # framework's plumbing end-to-end at trivial budgets. The smokes are
+      # JIT-compile-bound and otherwise serial, so xdist runs them in parallel
+      # and the wall clock is the slowest one, not their sum; `-n 2` pins that
+      # (one JAX process per physical runner core, ~4GB peak each) rather than
+      # letting `auto` vary with the runner. The timeout is ~2x the observed
+      # cold-cache cost: a smoke that regresses into a runaway budget fails
+      # here instead of eating the job's whole hour.
+      - run: WANDB_MODE=disabled uv run pytest experiments/tests -n 2
+        timeout-minutes: 25
 
   # The SPA build (tsc + vite). Catches type errors and broken/uncommitted
   # imports the Python suite can't see (the server runs no frontend code).

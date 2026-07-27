@@ -17,7 +17,10 @@ optim:
 replay:
   buffer_min: 4
 arena:
-  games: 4
+  games: 2
   every: 1
+  batch: 2
+  sims: 2
+  considered: 2
 wandb:
   mode: disabled

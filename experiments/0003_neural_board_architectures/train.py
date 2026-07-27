@@ -42,7 +42,8 @@ def _standardize(
     tr_fields: dict[str, Any] = {}
     v_fields: dict[str, Any] = {}
     for field, axes in (
-        ("nodes", (0, 1)), ("edges", (0, 1)), ("glob", (0,)), ("extra", (0,)),
+        ("nodes", (0, 1)), ("edges", (0, 1)), ("tiles", (0, 1)),
+        ("glob", (0,)), ("extra", (0,)),
     ):  # fmt: skip
         tr_fields[field], v_fields[field] = fit_apply(field, axes)
     return (
