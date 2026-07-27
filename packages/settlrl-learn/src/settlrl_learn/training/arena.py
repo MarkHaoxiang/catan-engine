@@ -41,8 +41,8 @@ def arena(
 ) -> ArenaResult:
     """The net's wins/episodes vs. ``POLICIES[opponent]``, seat-swapped at 2p.
 
-    ``episodes`` is the actual completed-game count, not ``n_games``:
-    ``evaluate`` overshoots (its win-count sync happens between scan windows)."""
+    ``episodes`` is the actual completed-game count and may differ from the
+    requested ``n_games``."""
 
     def make_agent() -> Any:
         return backend.play_agent(

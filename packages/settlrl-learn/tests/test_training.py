@@ -35,11 +35,14 @@ from settlrl_learn.training import (
     prepare_targets,
     train_epochs,
 )
+from settlrl_learn.training.arena import ArenaResult
 from settlrl_learn.training.backend import Backend, load_run_state, save_run_state
 from settlrl_learn.training.config import ArenaConfig, EvalConfig
+from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
 from settlrl_learn.training.gnn_backend import _SETUP_ROWS
 from settlrl_learn.training.loop import learn
 from settlrl_learn.training.selfplay import Samples, self_play
+from settlrl_learn.training.steps import run_arena
 
 
 def _shapes(tree: object) -> str:
@@ -468,18 +471,33 @@ def test_self_play_pcr_marks_fast_positions() -> None:
 
 def test_run_arena_uses_real_counts_for_elo_and_reports_se(monkeypatch: Any) -> None:
     # run_arena must feed the *actual* (wins, episodes) arena returns into the
-    # Elo MLE -- not wr * cfg.games -- and report the SE beside arena_elo.
-    from settlrl_learn.training.arena import ArenaResult
-    from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
-    from settlrl_learn.training.steps import run_arena
-
-    result = ArenaResult(wins=30.0, episodes=50)
-    monkeypatch.setattr("settlrl_learn.training.steps.arena", lambda *a, **k: result)
-    cfg = ArenaConfig(games=40, opponents=["lookahead"], anchor_elos={"lookahead": 0.0})
+    # Elo MLE -- not wr * cfg.games. Two anchors with different overshoot ratios
+    # (50/40 vs 20/40 episodes-per-nominal-game) make the real-counts and
+    # nominal-counts Elo provably different -- a single anchor can't discriminate
+    # the two paths, since anchored_elo there depends only on the win ratio.
+    results = {
+        "lookahead": ArenaResult(wins=30.0, episodes=50),
+        "random": ArenaResult(wins=10.0, episodes=20),
+    }
+    monkeypatch.setattr(
+        "settlrl_learn.training.steps.arena",
+        lambda *a, opponent, **k: results[opponent],
+    )
+    cfg = ArenaConfig(
+        games=40,
+        opponents=["lookahead", "random"],
+        anchor_elos={"lookahead": 0.0, "random": -800.0},
+    )
     metrics = run_arena(MLPBackend((16,)), object(), cfg, seed=0)
-    assert metrics["arena_winrate"] == result.winrate
-    assert metrics["arena_elo"] == anchored_elo([(0.0, 30.0, 50)])
-    assert metrics["arena_elo_se"] == anchored_elo_se([(0.0, 30.0, 50)])
+    real_inputs = [(0.0, 30.0, 50), (-800.0, 10.0, 20)]
+    nominal_inputs = [
+        (0.0, 0.6 * 40, 40),
+        (-800.0, 0.5 * 40, 40),
+    ]  # the old, buggy feed
+    assert metrics["arena_winrate"] == results["lookahead"].winrate
+    assert metrics["arena_elo"] == anchored_elo(real_inputs)
+    assert metrics["arena_elo"] != anchored_elo(nominal_inputs)
+    assert metrics["arena_elo_se"] == anchored_elo_se(real_inputs)
 
 
 def test_self_play_no_pcr_marks_all_full() -> None:
