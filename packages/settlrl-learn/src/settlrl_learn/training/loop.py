@@ -21,7 +21,7 @@ import functools
 import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import equinox as eqx
 import flashbax as fbx
@@ -43,7 +43,7 @@ from settlrl_learn.training.backend import (
     save_run_state,
 )
 from settlrl_learn.training.config import LearnConfig
-from settlrl_learn.training.selfplay import Samples, self_play
+from settlrl_learn.training.selfplay import Samples, SelfPlayStats, self_play
 from settlrl_learn.training.steps import (
     evaluate,
     make_optimizer,
@@ -51,6 +51,69 @@ from settlrl_learn.training.steps import (
     run_arena,
     train_epochs,
 )
+
+
+class SelfPlayCallables(NamedTuple):
+    """The pre-built jitted+vmapped callables :func:`self_play` takes.
+
+    ``make_net_search(num_simulations)`` builds the net's search: a jitted+vmapped
+    callable whose *first* argument is the net's array params (bind them with
+    ``functools.partial`` per weight update -- same shapes, so no recompile).
+    """
+
+    view_of: Callable[..., Any]
+    observe_of: Callable[..., Any]
+    setup_search: Callable[..., Any] | None
+    make_net_search: Callable[[int], Any]
+
+
+def _weights_factory(cfg: LearnConfig) -> tuple[Any, dict[str, Any]]:
+    """The search-weights factory (root-value-returning under value blending) and
+    the shared search knobs, less ``num_simulations``."""
+    s = cfg.search
+    mk = make_search_weights_value if cfg.value_blend.max > 0 else make_search_weights
+    return mk, {
+        "max_depth": s.max_depth, "max_num_considered_actions": s.max_considered,
+        "expected_rolls": s.expected_rolls, "chance_nodes": s.chance_nodes,
+        "dev_chance": s.dev_chance, "ordered": s.ordered,
+    }  # fmt: skip
+
+
+def selfplay_callables(
+    backend: Backend, cfg: LearnConfig, net: Any
+) -> SelfPlayCallables:
+    """Build the self-play callables ONCE for ``net``'s architecture -- the search
+    closes over the net's *static* (non-array) part and takes its arrays as a
+    traced arg, so a weight update is a new value of a same-shaped input (no
+    per-iteration recompile). Shared by :func:`learn` and
+    :func:`~settlrl_learn.training.bench.bench_selfplay`."""
+    s = cfg.search
+    setup_fn = backend.setup_policy()
+    mk, search_kwargs = _weights_factory(cfg)
+    view_of = jax.jit(jax.vmap(belief_view, in_axes=(0, 0, 0)))
+    observe_of = jax.jit(jax.vmap(backend.observe, in_axes=(0, 0, 0)))
+    setup_search = (
+        jax.jit(jax.vmap(setup_fn, in_axes=(0, 0, 0, 0, 0)))
+        if setup_fn is not None
+        else None
+    )
+    _, net_static = eqx.partition(net, eqx.is_array)
+
+    def make_net_search(num_simulations: int) -> Any:
+        def _net_weights(
+            arrays: Any, key: Any, layout: Any, view: Any, player: Any, mask: Any
+        ) -> Any:
+            model = eqx.combine(arrays, net_static)
+            v_fn, p_fn = backend.seams(model)
+            wfn = mk(
+                v_fn, prior=p_fn, value_scale=s.value_scale,
+                num_simulations=num_simulations, **search_kwargs,
+            )  # fmt: skip
+            return wfn(key, layout, view, player, mask)
+
+        return jax.jit(jax.vmap(_net_weights, in_axes=(None, 0, 0, 0, 0, 0)))
+
+    return SelfPlayCallables(view_of, observe_of, setup_search, make_net_search)
 
 
 def learn(
@@ -99,14 +162,8 @@ def learn(
         backend.empty_item(),
     )
     jax.block_until_ready(step(net, opt_state, _warm))  # type: ignore[no-untyped-call]
-    setup_fn = backend.setup_policy()
     blend = cfg.value_blend.max > 0
-    mk = make_search_weights_value if blend else make_search_weights
-    search_kwargs: dict[str, Any] = {
-        "max_depth": s.max_depth, "max_num_considered_actions": s.max_considered,
-        "expected_rolls": s.expected_rolls, "chance_nodes": s.chance_nodes,
-        "dev_chance": s.dev_chance, "ordered": s.ordered,
-    }  # fmt: skip
+    mk, search_kwargs = _weights_factory(cfg)
     # The teacher search uses the heuristic value at its own (factory) value_scale,
     # not the net's `s.value_scale`; the net's leaf is a win-probability logit.
     teacher_weights: PolicyWeights | PolicyWeightsValue | None = (
@@ -115,41 +172,18 @@ def learn(
         else None
     )
 
-    # Build the jitted+vmapped callables ONCE -- the search closes over the net's
-    # array params via eqx.partition/combine and takes them as a *traced* arg, so
-    # a weight update is a new value of a same-shaped input (no per-iter recompile).
-    view_of = jax.jit(jax.vmap(belief_view, in_axes=(0, 0, 0)))
-    observe_of = jax.jit(jax.vmap(backend.observe, in_axes=(0, 0, 0)))
-    setup_search = (
-        jax.jit(jax.vmap(setup_fn, in_axes=(0, 0, 0, 0, 0)))
-        if setup_fn is not None
-        else None
-    )
+    calls = selfplay_callables(backend, cfg, net)
     teacher_search = (
         jax.jit(jax.vmap(teacher_weights, in_axes=(0, 0, 0, 0, 0)))
         if teacher_weights is not None
         else None
     )
-    _, net_static = eqx.partition(net, eqx.is_array)
-
-    def _make_net_search(num_simulations: int) -> Any:
-        def _net_weights(
-            arrays: Any, key: Any, layout: Any, view: Any, player: Any, mask: Any
-        ) -> Any:
-            model = eqx.combine(arrays, net_static)
-            v_fn, p_fn = backend.seams(model)
-            wfn = mk(
-                v_fn, prior=p_fn, value_scale=s.value_scale,
-                num_simulations=num_simulations, **search_kwargs,
-            )  # fmt: skip
-            return wfn(key, layout, view, player, mask)
-
-        return jax.jit(jax.vmap(_net_weights, in_axes=(None, 0, 0, 0, 0, 0)))
-
-    net_search = _make_net_search(s.num_simulations)
+    net_search = calls.make_net_search(s.num_simulations)
     # Playout-cap randomization: a cheaper search for the value-only (fast) steps.
     pcr = cfg.selfplay.pcr_full_prob < 1.0 and cfg.selfplay.pcr_fast_sims > 0
-    net_search_fast: Any = _make_net_search(cfg.selfplay.pcr_fast_sims) if pcr else None
+    net_search_fast: Any = (
+        calls.make_net_search(cfg.selfplay.pcr_fast_sims) if pcr else None
+    )
 
     def _play(
         search: Any,
@@ -158,10 +192,11 @@ def learn(
         *,
         fast_search: Any = None,
         full_prob: float = 1.0,
-    ) -> Samples:
+    ) -> tuple[Samples, SelfPlayStats]:
         return self_play(
             search, fast_search=fast_search, full_prob=full_prob, n_samples=n,
-            observe_of=observe_of, view_of=view_of, setup_search=setup_search,
+            observe_of=calls.observe_of, view_of=calls.view_of,
+            setup_search=calls.setup_search,
             batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
             seed=seed, record_value=blend, track_ordering=s.ordered,
             max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
@@ -191,15 +226,21 @@ def learn(
             if pcr:
                 fast = functools.partial(net_search_fast, net_arrays)
                 full_prob = cfg.selfplay.pcr_full_prob
-        fresh = _play(
+        fresh, sp_stats = _play(
             search, cfg.selfplay.samples, cfg.seed + 1 + i,
             fast_search=fast, full_prob=full_prob,
         )  # fmt: skip
         t_selfplay = time.perf_counter() - t0
+        # `selfplay_discarded` is the pending positions thrown away at the
+        # iteration boundary (games still unfinished) -- the self-play waste.
+        sp = {
+            "selfplay_steps": float(sp_stats.env_steps),
+            "selfplay_discarded": float(sp_stats.discarded),
+        }
         nf = fresh["value"].shape[0]
         if nf == 0:  # degenerate net dragged every game past the budget; skip
             if on_iter is not None:
-                on_iter(i, {"samples": 0.0}, net)
+                on_iter(i, {"samples": 0.0, **sp}, net)
             continue
 
         # Periodic generalization check: score val_* on this iter's fresh batch
@@ -239,7 +280,7 @@ def learn(
         metrics: dict[str, float] = {
             "samples": float(nf), "train_steps": float(steps),
             "lr": cfg.optim.lr, "target_entropy": target_entropy,
-            "value_blend_alpha": alpha, "t_selfplay": t_selfplay,
+            "value_blend_alpha": alpha, "t_selfplay": t_selfplay, **sp,
         }  # fmt: skip
 
         t1 = time.perf_counter()

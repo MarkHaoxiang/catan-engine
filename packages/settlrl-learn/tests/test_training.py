@@ -14,6 +14,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pytest
 from expecttest import assert_expected_inline
 from jaxtyping import Array
 from settlrl_engine.belief import belief_view
@@ -37,6 +38,7 @@ from settlrl_learn.training import (
 )
 from settlrl_learn.training.arena import ArenaResult
 from settlrl_learn.training.backend import Backend, load_run_state, save_run_state
+from settlrl_learn.training.bench import bench_selfplay
 from settlrl_learn.training.config import ArenaConfig, EvalConfig
 from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
 from settlrl_learn.training.gnn_backend import _SETUP_ROWS
@@ -125,7 +127,7 @@ def test_self_play_samples_shape_under_uniform_policy() -> None:
     # Drives the real generic self-play (env stepping, pending flush, outcome
     # credit) with the MLP observation but a trivial policy -- fast, no search.
     backend = MLPBackend((16,))
-    samples = self_play(
+    samples, _ = self_play(
         n_samples=8, batch_size=4, seed=0,
         **_jitted(_uniform_weights, backend),
     )  # fmt: skip
@@ -142,6 +144,21 @@ def test_self_play_samples_shape_under_uniform_policy() -> None:
     assert samples["policy"].shape[1] == N_FLAT
 
 
+def test_self_play_reports_stats() -> None:
+    # The stats side of the contract: env steps actually taken, recorded ==
+    # the returned sample count, and a non-negative discard count (the pending
+    # positions of games still unfinished when the budget ran out -- the
+    # iteration-boundary waste).
+    backend = MLPBackend((16,))
+    samples, stats = self_play(
+        n_samples=4, batch_size=2, seed=0,
+        **_jitted(_uniform_weights, backend),
+    )  # fmt: skip
+    assert stats.env_steps > 0
+    assert stats.recorded == samples["value"].shape[0]
+    assert stats.discarded >= 0
+
+
 def _uniform_weights_value(
     key: Array, layout: BoardLayout, view: Any, player: Array, mask: Array
 ) -> tuple[Array, Array]:
@@ -151,7 +168,7 @@ def _uniform_weights_value(
 
 def test_self_play_records_root_value_when_asked() -> None:
     backend = MLPBackend((16,))
-    samples = self_play(
+    samples, _ = self_play(
         n_samples=8, batch_size=4, seed=0, record_value=True,
         **_jitted(_uniform_weights_value, backend),
     )  # fmt: skip
@@ -264,7 +281,7 @@ def test_self_play_value_is_acting_seat_win_loss() -> None:
     # both-classes-present check is the strongest lane-agnostic form of the
     # complementary-per-game property.)
     backend = MLPBackend((16,))
-    samples = self_play(
+    samples, _ = self_play(
         n_samples=16, batch_size=4, seed=0, temperature=0.0,
         **_jitted(_uniform_weights, backend),
     )  # fmt: skip
@@ -280,7 +297,7 @@ def test_self_play_policy_target_is_legal() -> None:
     # ~1, and -- the load-bearing part -- ZERO mass on illegal actions, since
     # the search may only propose legal moves.
     backend = MLPBackend((16,))
-    samples = self_play(
+    samples, _ = self_play(
         n_samples=16, batch_size=4, seed=3, temperature=0.0,
         **_jitted(_uniform_legal_dist, backend),
     )  # fmt: skip
@@ -301,7 +318,7 @@ def test_self_play_excludes_setup_gnn() -> None:
         PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1)
     )
     setup_search = jax.jit(jax.vmap(backend.setup_policy(), in_axes=(0, 0, 0, 0, 0)))
-    samples = self_play(
+    samples, _ = self_play(
         n_samples=8, batch_size=4, seed=4, temperature=0.0,
         setup_search=setup_search,
         **_jitted(_uniform_weights, backend),
@@ -385,7 +402,7 @@ def test_train_epochs_is_deterministic_in_key() -> None:
     import optax
 
     backend = MLPBackend((16,))
-    samples = self_play(
+    samples, _ = self_play(
         n_samples=16, batch_size=4, seed=0, **_jitted(_uniform_legal_dist, backend)
     )
     optimizer = optax.adamw(1e-3)
@@ -459,7 +476,7 @@ def test_self_play_pcr_marks_fast_positions() -> None:
     # still train the value head).
     backend = MLPBackend((16,))
     j = _jitted(_uniform_legal_dist, backend)
-    samples = self_play(
+    samples, _ = self_play(
         n_samples=64, batch_size=8, seed=1,
         fast_search=j["search"], full_prob=0.5, **j,
     )  # fmt: skip
@@ -503,10 +520,43 @@ def test_run_arena_uses_real_counts_for_elo_and_reports_se(monkeypatch: Any) -> 
 def test_self_play_no_pcr_marks_all_full() -> None:
     # Default (no fast_search): every position is a full-search position.
     backend = MLPBackend((16,))
-    samples = self_play(
+    samples, _ = self_play(
         n_samples=8, batch_size=4, seed=0, **_jitted(_uniform_weights, backend)
     )
     assert np.all(samples["train_policy"] == 1.0)
+
+
+def _bench_cfg() -> LearnConfig:
+    """The smallest config that still runs the real net search (bench wiring)."""
+    return LearnConfig(
+        n_iterations=1, seed=0,
+        search=SearchSettings(num_simulations=2, max_considered=4),
+        selfplay=SelfPlayConfig(samples=4, batch=2),
+        arena=ArenaConfig(games=0),
+    )  # fmt: skip
+
+
+def test_bench_selfplay_reports_throughput() -> None:
+    backend = MLPBackend((16,))
+    net = backend.init(jax.random.key(0))
+    out = bench_selfplay(backend, net, _bench_cfg(), warmup=1, repeats=2, seed=0)
+    assert set(out) == {
+        "samples_per_s", "moves_per_s", "sims_per_s", "samples",
+        "env_steps", "discarded", "t_median_s", "t_0", "t_1",
+    }  # fmt: skip
+    assert out["samples_per_s"] > 0.0 and out["samples"] > 0.0
+    assert out["sims_per_s"] == out["moves_per_s"] * 2  # num_simulations
+
+
+def test_bench_selfplay_rejects_playout_cap() -> None:
+    # sims_per_s assumes every step ran the full search; PCR would make it a lie.
+    backend = MLPBackend((16,))
+    cfg = _bench_cfg()
+    cfg = cfg.model_copy(
+        update={"selfplay": cfg.selfplay.model_copy(update={"pcr_full_prob": 0.5})}
+    )
+    with pytest.raises(ValueError, match="pcr_full_prob"):
+        bench_selfplay(backend, backend.init(jax.random.key(0)), cfg)
 
 
 def test_mlp_loss_masks_policy_by_train_policy() -> None:

@@ -107,6 +107,12 @@ deps only because this subpackage uses them.
     fast (cheap `fast_search`); every position records its outcome value, but the
     `train_policy` flag is 1 only on full-search positions, so the policy loss
     trains on deep targets only (value on all). `full_prob` = 1 disables it.
+    Returns `(Samples, SelfPlayStats)`: `env_steps` (batched env steps, each
+    advancing all lanes), `recorded`, and `discarded` — positions generated but
+    never returned, i.e. the pending buffers of games still unfinished when the
+    call hit its sample target, plus `max_game_len` trims. The loop logs the
+    latter as `selfplay_discarded`: the *iteration-boundary waste* (games are cut
+    mid-flight every iteration, and only finished games yield samples).
   - `training/loop.py::learn(backend, cfg: LearnConfig, *, teacher_value=…,
     checkpoint_dir=…, resume_from=…, …)` — the orchestrator over the `steps`
     units. Per-iteration RNG is a pure function of `cfg.seed` and the iteration
@@ -149,10 +155,23 @@ deps only because this subpackage uses them.
     stay frozen for a run. The per-iter `val_*` / `policy_*` / `value_*` health
     metrics (from `Backend.eval_metrics`) are the cheap high-frequency proxies
     between arena rounds.
+    `loop.selfplay_callables(backend, cfg, net)` builds the once-built
+    jitted+vmapped self-play callables (`view_of` / `observe_of` / `setup_search`
+    + a `make_net_search(num_simulations)` factory closing over the net's *static*
+    part); `learn` and `bench_selfplay` share it so the wiring cannot drift.
     The optimiser is `steps.make_optimizer(cfg.optim)` — adamw, optionally
     preceded by `clip_by_global_norm` (`cfg.optim.grad_clip`, default 1.0; 0
     disables). The clip is stateless, so an unclipped checkpoint must be resumed
     with `grad_clip=0` (its opt-state has no clip layer).
+  - `training/bench.py::bench_selfplay(backend, net, cfg, *, warmup, repeats,
+    seed)` — the self-play throughput probe (the loop's dominant cost, isolated:
+    no optimiser/replay/arena). `warmup` untimed calls at `seed + 1000` pay the
+    XLA compile, then every timed repeat runs the *same* workload at `seed`, so
+    the spread across `t_0..t_n` is measurement noise. Reports medians:
+    `samples_per_s`, `moves_per_s` (a move is one lane-step, `env_steps * batch`),
+    `sims_per_s` (`moves_per_s * search.num_simulations`). Rejects
+    `pcr_full_prob` < 1 — playout-cap randomization breaks the sims-per-move
+    accounting.
   - `training/mlp_backend.py::MLPBackend` — the `AZParams` net over the
     engineered feature vector; **unmasked** policy CE + value-logistic loss,
     optax adamw, the net plays setup itself.

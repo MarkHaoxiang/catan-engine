@@ -25,6 +25,7 @@ A training-side module: not imported by the package root.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -41,6 +42,21 @@ ObserveFn = Callable[[BoardLayout, BoardState, Array], dict[str, Array]]
 Samples = dict[str, np.ndarray]
 """A batch of training positions: the backend's observation keys plus ``policy``,
 ``mask``, and ``value``, each stacked on a leading sample axis."""
+
+
+class SelfPlayStats(NamedTuple):
+    """What a :func:`self_play` call did.
+
+    ``env_steps`` counts batched env steps (each advances all ``batch_size``
+    lanes); ``recorded`` is the returned sample count; ``discarded`` is the
+    positions generated but never returned -- the pending positions of games
+    still unfinished when the call exited (the iteration-boundary waste), plus
+    any trimmed by ``max_game_len``.
+    """
+
+    env_steps: int
+    recorded: int
+    discarded: int
 
 
 def _sample_moves(key: Array, weights: Array, mask: Array, temperature: float) -> Array:
@@ -69,10 +85,11 @@ def self_play(
     max_game_len: int = 800,
     record_value: bool = False,
     track_ordering: bool = False,
-) -> Samples:
+) -> tuple[Samples, SelfPlayStats]:
     """Collect >= ``n_samples`` self-play positions, the moves and policy targets
     drawn from ``search``. Positions from finished games are credited with the
-    acting seat's win (1) / loss (0); unfinished games are discarded.
+    acting seat's win (1) / loss (0); unfinished games are discarded (counted in
+    the returned :class:`SelfPlayStats`).
 
     ``search``, ``observe_of``, ``view_of`` and ``setup_search`` are pre-built
     jitted+vmapped callables (see the module docstring): the search is compiled
@@ -106,6 +123,8 @@ def self_play(
     trailing: dict[str, tuple[int, ...]] = {}
     vals: list[float] = []
     key = jax.random.key(seed)
+    env_steps = 0
+    trimmed = 0
 
     for _step in range(max_steps):
         if len(vals) >= n_samples:
@@ -172,9 +191,11 @@ def self_play(
             )
             pending[lane].append(row)
             if len(pending[lane]) > max_game_len:
+                trimmed += len(pending[lane]) - max_game_len
                 del pending[lane][:-max_game_len]
 
         env.step(*flat_to_action(move))
+        env_steps += 1
         rewards = np.asarray(env.rewards)
         for lane in np.flatnonzero(np.asarray(env.terminations).any(axis=1)).tolist():
             for obs_l, pol_l, mask_l, seat, q_l, tp_l in pending[lane]:
@@ -188,10 +209,15 @@ def self_play(
                 vals.append(float(rewards[lane, seat] > 0))
             pending[lane] = []
 
+    stats = SelfPlayStats(
+        env_steps=env_steps,
+        recorded=len(vals),
+        discarded=trimmed + sum(len(p) for p in pending),
+    )
     if not vals:  # no game finished within the budget (a degenerate cold net)
         empty: Samples = {k: np.zeros((0, *trailing[k]), np.float32) for k in trailing}
         empty["value"] = np.zeros((0,), np.float32)
-        return empty
+        return empty, stats
     samples: Samples = {k: np.stack(out[k]) for k in out}
     samples["value"] = np.asarray(vals, np.float32)
-    return samples
+    return samples, stats

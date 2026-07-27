@@ -13,6 +13,7 @@ from settlrl_learn.training.backend import (
     load_run_state,
     save_run_state,
 )
+from settlrl_learn.training.bench import bench_selfplay
 from settlrl_learn.training.config import (
     ArenaConfig,
     EvalConfig,
@@ -31,8 +32,9 @@ from settlrl_learn.training.gnn_backend import (
     make_net_agent,
     setup_policy,
 )
-from settlrl_learn.training.loop import learn
+from settlrl_learn.training.loop import SelfPlayCallables, learn, selfplay_callables
 from settlrl_learn.training.mlp_backend import MLPBackend, mlp_loss
+from settlrl_learn.training.selfplay import SelfPlayStats, self_play
 from settlrl_learn.training.steps import (
     evaluate,
     make_optimizer,
@@ -53,11 +55,14 @@ __all__ = [
     "ReplayConfig",
     "RunState",
     "SearchSettings",
+    "SelfPlayCallables",
     "SelfPlayConfig",
+    "SelfPlayStats",
     "TeacherConfig",
     "ValueBlendConfig",
     "anchored_elo",
     "arena",
+    "bench_selfplay",
     "evaluate",
     "expected_score",
     "gnn_loss",
@@ -69,6 +74,8 @@ __all__ = [
     "prepare_targets",
     "run_arena",
     "save_run_state",
+    "self_play",
+    "selfplay_callables",
     "setup_policy",
     "train_epochs",
 ]
