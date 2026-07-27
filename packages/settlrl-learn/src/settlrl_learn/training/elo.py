@@ -12,6 +12,7 @@ A training-side module: not imported by the package root.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 
 
@@ -51,3 +52,21 @@ def anchored_elo(
         else:
             b = m
     return 0.5 * (a + b)
+
+
+def anchored_elo_se(
+    anchors: Iterable[tuple[float, float, int]], *, rating: float | None = None
+) -> float:
+    """Standard error of :func:`anchored_elo` from the Fisher information at the
+    MLE: ``(400/ln 10) / sqrt(sum_a games_a * p_a * (1 - p_a))``, ``p_a`` the
+    fitted win probability vs anchor ``a``. ``rating`` overrides the MLE fit.
+    Returns ``nan`` if no anchor has games."""
+    data = [(elo, w, g) for elo, w, g in anchors if g > 0]
+    if not data:
+        return float("nan")
+    r = anchored_elo(data) if rating is None else rating
+    info = sum(
+        g * expected_score(r, elo) * (1.0 - expected_score(r, elo))
+        for elo, _, g in data
+    )
+    return (400.0 / math.log(10.0)) / math.sqrt(info) if info > 0 else float("inf")
