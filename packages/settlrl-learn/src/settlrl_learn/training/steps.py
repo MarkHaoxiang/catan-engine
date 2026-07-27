@@ -19,7 +19,7 @@ from jaxtyping import Array
 from settlrl_learn.training.arena import arena
 from settlrl_learn.training.backend import Backend
 from settlrl_learn.training.config import ArenaConfig, OptimConfig
-from settlrl_learn.training.elo import anchored_elo
+from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
 from settlrl_learn.training.selfplay import Samples
 
 
@@ -86,20 +86,24 @@ def run_arena(
 ) -> dict[str, float]:
     """Play the net against each configured opponent; ``lookahead`` -> the gate
     metric ``arena_winrate``, others -> ``arena_vs_<opponent>``, plus ``arena_elo``
-    -- the MLE Elo on the fixed ``anchor_elos`` scale. Opponents get well-separated
-    seeds (``seed + j*10_000``); the loop holds ``seed`` fixed across iterations so
-    every checkpoint faces the same games (a paired strength curve)."""
+    -- the MLE Elo on the fixed ``anchor_elos`` scale -- and ``arena_elo_se``, its
+    standard error. Opponents get well-separated seeds (``seed + j*10_000``); the
+    loop holds ``seed`` fixed across iterations so every checkpoint faces the same
+    games (a paired strength curve)."""
     metrics: dict[str, float] = {}
     elo_inputs: list[tuple[float, float, int]] = []
     for j, opp in enumerate(cfg.opponents):
-        wr = arena(
+        res = arena(
             backend, net, opponent=opp, n_games=cfg.games,
             num_simulations=cfg.sims, batch_size=cfg.batch,
             max_num_considered_actions=cfg.considered, seed=seed + j * 10_000,
         )  # fmt: skip
-        metrics["arena_winrate" if opp == "lookahead" else f"arena_vs_{opp}"] = wr
+        metrics["arena_winrate" if opp == "lookahead" else f"arena_vs_{opp}"] = (
+            res.winrate
+        )
         if opp in cfg.anchor_elos:
-            elo_inputs.append((cfg.anchor_elos[opp], wr * cfg.games, cfg.games))
+            elo_inputs.append((cfg.anchor_elos[opp], res.wins, res.episodes))
     if elo_inputs:
         metrics["arena_elo"] = anchored_elo(elo_inputs)
+        metrics["arena_elo_se"] = anchored_elo_se(elo_inputs)
     return metrics

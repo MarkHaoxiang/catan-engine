@@ -466,6 +466,22 @@ def test_self_play_pcr_marks_fast_positions() -> None:
     assert tp.shape == samples["value"].shape  # a flag per recorded position
 
 
+def test_run_arena_uses_real_counts_for_elo_and_reports_se(monkeypatch: Any) -> None:
+    # run_arena must feed the *actual* (wins, episodes) arena returns into the
+    # Elo MLE -- not wr * cfg.games -- and report the SE beside arena_elo.
+    from settlrl_learn.training.arena import ArenaResult
+    from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
+    from settlrl_learn.training.steps import run_arena
+
+    result = ArenaResult(wins=30.0, episodes=50)
+    monkeypatch.setattr("settlrl_learn.training.steps.arena", lambda *a, **k: result)
+    cfg = ArenaConfig(games=40, opponents=["lookahead"], anchor_elos={"lookahead": 0.0})
+    metrics = run_arena(MLPBackend((16,)), object(), cfg, seed=0)
+    assert metrics["arena_winrate"] == result.winrate
+    assert metrics["arena_elo"] == anchored_elo([(0.0, 30.0, 50)])
+    assert metrics["arena_elo_se"] == anchored_elo_se([(0.0, 30.0, 50)])
+
+
 def test_self_play_no_pcr_marks_all_full() -> None:
     # Default (no fast_search): every position is a full-search position.
     backend = MLPBackend((16,))

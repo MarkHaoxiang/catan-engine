@@ -10,11 +10,22 @@ A training-side module: not imported by the package root.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 from settlrl_agents import POLICIES, BeliefSpec, evaluate
 
 from settlrl_learn.training.backend import Backend
+
+
+class ArenaResult(NamedTuple):
+    """Seat-swapped match outcome: net wins over actual completed episodes."""
+
+    wins: float
+    episodes: int
+
+    @property
+    def winrate(self) -> float:
+        return self.wins / max(self.episodes, 1)
 
 
 def arena(
@@ -27,8 +38,11 @@ def arena(
     max_num_considered_actions: int = 16,
     batch_size: int = 16,
     seed: int = 0,
-) -> float:
-    """The net's win rate vs. ``POLICIES[opponent]``, seat-swapped at 2p."""
+) -> ArenaResult:
+    """The net's wins/episodes vs. ``POLICIES[opponent]``, seat-swapped at 2p.
+
+    ``episodes`` is the actual completed-game count, not ``n_games``:
+    ``evaluate`` overshoots (its win-count sync happens between scan windows)."""
 
     def make_agent() -> Any:
         return backend.play_agent(
@@ -44,4 +58,4 @@ def arena(
     r2 = evaluate(
         [base, net_spec], n_episodes=half, batch_size=batch_size, seed=seed + 1
     )
-    return float(r1.wins[0] + r2.wins[1]) / max(int(r1.episodes + r2.episodes), 1)
+    return ArenaResult(float(r1.wins[0] + r2.wins[1]), int(r1.episodes + r2.episodes))

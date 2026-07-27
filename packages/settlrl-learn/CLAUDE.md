@@ -129,15 +129,20 @@ deps only because this subpackage uses them.
     action-ordering lock-out (`settlrl_engine.ordering`): self-play's env runs
     `track_ordering` and the search threads the lock-out deeper; the backends
     carry it for the arena agent too.
-  - `training/arena.py::arena` — the net's win rate vs. a `POLICIES` opponent,
-    seat-swapped at 2p (`lookahead` = the Stage-1 gate; `random` = the
-    lower-bound sanity check); the play agent comes from `backend.play_agent`.
-    `steps.run_arena` plays each `cfg.arena.opponents` entry and reports
-    `arena_winrate` / `arena_vs_<opp>` **plus `arena_elo`** — the MLE Elo
+  - `training/arena.py::arena` — the net's `ArenaResult(wins, episodes)` vs. a
+    `POLICIES` opponent, seat-swapped at 2p (`lookahead` = the Stage-1 gate;
+    `random` = the lower-bound sanity check); the play agent comes from
+    `backend.play_agent`. `episodes` is the real completed-game count, not the
+    requested `n_games` (`evaluate`'s win-count sync happens between scan
+    windows, so it overshoots) — real `(wins, episodes)`, not `winrate * n_games`,
+    feed the Elo MLE. `steps.run_arena` plays each `cfg.arena.opponents` entry and
+    reports `arena_winrate` / `arena_vs_<opp>` **plus `arena_elo`** — the MLE Elo
     (`training/elo.py::anchored_elo`) on the fixed `cfg.arena.anchor_elos` scale
-    (heuristic pinned at 0 = the gate; random well below). The loop holds the
-    arena **seed fixed across iterations** (no `+i`), so every checkpoint faces
-    the same games and the curve is paired (the dice/board luck differences out)
+    (heuristic pinned at 0 = the gate; random well below) — **and `arena_elo_se`**,
+    its standard error (`anchored_elo_se`, Fisher information at the MLE). The
+    loop holds the arena **seed fixed across iterations** (no `+i`), so every
+    checkpoint faces the same games and the curve is paired (the dice/board luck
+    differences out)
     — the chosen variance cut, matching canopy/lc0's paired-seed tournaments
     over a checkpoint round-robin (a within-pool round-robin drifts when the pool
     changes; the anchored gauntlet stays comparable across runs). Anchors must

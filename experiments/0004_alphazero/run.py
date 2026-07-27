@@ -166,7 +166,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         backend, model, n_games=cfg.arena.games, num_simulations=cfg.arena.sims,
         batch_size=cfg.arena.batch, max_num_considered_actions=cfg.arena.considered,
         seed=cfg.seed + 99,
-    )  # fmt: skip
+    ).winrate  # fmt: skip
     verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
     run.finish(
         verdict, arena_winrate=winrate, best_arena_winrate=best, gate=cfg.gate_winrate
@@ -235,7 +235,7 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         backend, final, n_games=cfg.arena.games, num_simulations=cfg.arena.sims,
         batch_size=cfg.arena.batch, max_num_considered_actions=cfg.arena.considered,
         seed=cfg.seed + 99,
-    )  # fmt: skip
+    ).winrate  # fmt: skip
     verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
     run.finish(
         verdict, arena_winrate=winrate, best_arena_winrate=best, gate=cfg.gate_winrate
