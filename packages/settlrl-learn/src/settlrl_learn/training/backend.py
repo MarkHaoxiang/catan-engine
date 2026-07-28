@@ -120,8 +120,10 @@ def load_run_state(path: str | Path, template: RunState) -> RunState:
     """``path``'s run state, shaped by ``template``.
 
     A pre-``selfplay_carry`` checkpoint (the file ends where that section would
-    start) loads with the template's carry. Every other mismatch -- a resume into
-    a differently-configured run -- raises out of eqx's leaf checks.
+    start) loads with the template's carry, and a ``None`` template carry skips
+    the section entirely (a run that never reads the pool). A carry that does not
+    fit the template raises ``ValueError``; every other mismatch raises out of
+    eqx's leaf checks.
     """
     with Path(path).open("rb") as f:
         net, opt_state, buffer_state, iteration, best = cast(
@@ -129,7 +131,16 @@ def load_run_state(path: str | Path, template: RunState) -> RunState:
             eqx.tree_deserialise_leaves(f, template[:_PRE_CARRY_FIELDS]),
         )
         carry = template.selfplay_carry
-        if f.read(1) != b"":
+        if carry is not None and f.read(1) != b"":
             f.seek(-1, 1)
-            carry = eqx.tree_deserialise_leaves(f, carry)
+            try:
+                carry = eqx.tree_deserialise_leaves(f, carry)
+            except RuntimeError as e:
+                raise ValueError(
+                    "the checkpointed self-play carry does not fit this run: it "
+                    "was written under a different selfplay.persistent, "
+                    "selfplay.batch, selfplay.max_game_len or value_blend. "
+                    "Resume with the settings that wrote it, or start a fresh "
+                    f"run. ({e})"
+                ) from e
     return RunState(net, opt_state, buffer_state, iteration, best, carry)

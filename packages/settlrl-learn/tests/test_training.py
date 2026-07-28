@@ -545,6 +545,36 @@ def test_learn_persistent_zero_sample_iteration_checkpoints(tmp_path: Path) -> N
     _assert_nets_bit_exact(straight, resumed)  # the 3rd iteration did checkpoint
 
 
+def test_learn_skips_the_pool_when_resuming_without_persistence(
+    tmp_path: Path,
+) -> None:
+    # Flipping `persistent` OFF across a resume: the run never reads the pool, so
+    # the checkpoint's (much larger, differently-shaped) carry section is skipped
+    # rather than shape-checked. Resuming at the checkpoint's own iteration count
+    # runs nothing, so the returned net must be the checkpointed one verbatim.
+    backend = MLPBackend((16,))
+    trained = learn(
+        backend, _learn_cfg(1, selfplay=_PERSISTENT), checkpoint_dir=tmp_path
+    )
+    resumed = learn(backend, _learn_cfg(1), resume_from=tmp_path / "runstate.eqx")
+    _assert_nets_bit_exact(trained, resumed)
+
+
+def test_learn_rejects_resuming_a_pool_less_checkpoint_as_persistent(
+    tmp_path: Path,
+) -> None:
+    # Flipping `persistent` ON across a resume: the checkpoint holds no pool to
+    # continue, and its zero-row pad cannot fit the padded template. That must
+    # name the knob, not surface a raw eqx shape error.
+    backend = MLPBackend((16,))
+    learn(backend, _learn_cfg(1), checkpoint_dir=tmp_path)
+    with pytest.raises(ValueError, match=r"selfplay\.persistent"):
+        learn(
+            backend, _learn_cfg(2, selfplay=_PERSISTENT),
+            resume_from=tmp_path / "runstate.eqx",
+        )  # fmt: skip
+
+
 def test_learn_resumes_from_a_pre_carry_checkpoint(tmp_path: Path) -> None:
     # `RunState` grew `selfplay_carry` (last field, so the carry is the file's
     # trailing section): a checkpoint written before the change -- this one with

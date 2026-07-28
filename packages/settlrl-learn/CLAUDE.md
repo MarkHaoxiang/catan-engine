@@ -98,16 +98,26 @@ deps only because this subpackage uses them.
     `selfplay_carry` is the padded self-play pool (below) and is deliberately the
     **last** field, so a checkpoint written before it existed is exactly the file
     minus its trailing section: `load_run_state` reads the older fields, and if
-    the file ends there keeps the template's (empty) carry. Every other mismatch
-    — a resume into a run with a different batch size, seat count or
-    `value_blend` — falls out of eqx's per-leaf shape/dtype checks, and the one
-    semantic the shapes cannot see (`search.ordered`) is checked by `from_padded`.
+    the file ends there keeps the template's (empty) carry. Resuming into a
+    differently-configured run is covered in three distinct ways, because the
+    shapes do not see everything: `selfplay.persistent` **off** skips the carry
+    section unread (a `None` template carry — the run has no reader for it, so a
+    persistent checkpoint's pad costs nothing and checks nothing); a mismatched
+    section that *is* read — `persistent` turned **on** over a pool-less
+    checkpoint, or a changed `selfplay.batch` / `max_game_len` / `value_blend` —
+    trips eqx's per-leaf shape/dtype gate, which `load_run_state` re-raises as a
+    `ValueError` naming those knobs; and `search.ordered`, which no shape can
+    see, rides as its own leaf checked by `from_padded`.
     Checkpoint size: the pad is fixed-shape, so a *persistent* run pays it in
     full at every write — **1.82 GiB** at B=256 / `max_game_len` 800 / GNN obs +
     662-wide policy, ~0.5 s to build and ~0.5 s to write (measured 2026-07-28,
-    independent of how full the pool actually is). A non-persistent run pads to
-    zero rows and pays 266 KiB (the env arrays). If that write cost ever bites,
-    the lever is a separate pad bound below `max_game_len`, not the fixed shape.
+    independent of how full the pool actually is). It is transient: the loop
+    frees each `to_padded` result after the write and drops the zero template
+    once a persistent run is under way (every checkpoint then pads the live
+    carry), so steady-state host RAM is the live pool alone (~0.6 GiB at those
+    shapes). A non-persistent run pads to zero rows and pays 266 KiB (the env
+    arrays). If that write cost ever bites, the lever is a separate pad bound
+    below `max_game_len`, not the fixed shape.
   - `training/selfplay.py::self_play` — batched n-player self-play, the search
     (net's or a fixed teacher's) guiding the re-determinizing moves and improved
     policy. The backend's `observe` records the *true* board (net learns the

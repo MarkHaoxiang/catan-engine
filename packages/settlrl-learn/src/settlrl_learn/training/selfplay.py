@@ -121,11 +121,11 @@ class PaddedCarry(NamedTuple):
     """A :class:`SelfPlayCarry` as a fixed-shape pytree, so it can ride in an
     eqx-serialised :class:`~settlrl_learn.training.backend.RunState`.
 
-    Each recorded key of ``pending`` pads to ``(batch, max_game_len, *trailing)``
-    (host numpy -- the pad is large and never touched on device) with the live
-    per-lane row count in ``pending_len``; ``seat`` joins the recorded keys.
-    ``present`` is 0 for the zero template that stands in when a run keeps no
-    carry, so a resumed run can tell "no pool was stored" from "an empty pool".
+    Each recorded key of ``pending`` is host numpy padded to
+    ``(batch, max_game_len, *trailing)``, live rows per lane in ``pending_len``;
+    ``seat`` joins the recorded keys. ``present`` is 0 for the zero template a
+    run with no live pool checkpoints, so "no pool was stored" and "an empty
+    pool" stay distinguishable.
     """
 
     env: PaddedEnv
@@ -160,6 +160,17 @@ def _typed_keys(template: Any, tree: Any) -> Any:
     )
 
 
+def _make_env(
+    *, batch_size: int, seed: int, n_players: int, track_ordering: bool
+) -> BatchedSettlrlEnv:
+    """Self-play's env. The single construction site: a carried pool is only
+    restorable if the env it is rebuilt into is built exactly like the original."""
+    return BatchedSettlrlEnv(
+        batch_size=batch_size, seed=seed, reward="sparse", n_players=n_players,
+        track_beliefs=True, track_ordering=track_ordering,
+    )  # fmt: skip
+
+
 def _env_arrays(env: BatchedSettlrlEnv) -> PaddedEnv:
     return PaddedEnv(
         layout=env._layout,
@@ -182,13 +193,11 @@ def _env_arrays(env: BatchedSettlrlEnv) -> PaddedEnv:
 
 
 def _restore_env(padded: PaddedEnv, *, track_ordering: bool) -> BatchedSettlrlEnv:
-    """A live env equivalent to the one ``padded`` was taken from. Its ctor
-    arguments are self-play's fixed ones plus the shapes' ``batch_size`` /
-    ``n_players``; ``seed`` is not live state (only :meth:`reset` reads it)."""
+    """A live env equivalent to the one ``padded`` was taken from."""
     batch_size, n_players = padded.reward.shape
-    env = BatchedSettlrlEnv(
-        batch_size=batch_size, seed=0, reward="sparse", n_players=n_players,
-        track_beliefs=True, track_ordering=track_ordering,
+    env = _make_env(
+        batch_size=batch_size, seed=0, n_players=n_players,
+        track_ordering=track_ordering,
     )  # fmt: skip
     env._layout = jax.tree.map(jnp.asarray, padded.layout)
     env._state = _typed_keys(env._state, padded.state)
@@ -205,6 +214,19 @@ def _restore_env(padded: PaddedEnv, *, track_ordering: bool) -> BatchedSettlrlEn
     return env
 
 
+def _empty_pending(
+    batch_size: int,
+    max_game_len: int,
+    spec: dict[str, tuple[tuple[int, ...], np.dtype[Any]]],
+) -> tuple[dict[str, np.ndarray], np.ndarray]:
+    pending = {
+        k: np.zeros((batch_size, max_game_len, *shape), dt)
+        for k, (shape, dt) in spec.items()
+    }
+    pending["seat"] = np.zeros((batch_size, max_game_len), np.int32)
+    return pending, np.zeros((batch_size,), np.int32)
+
+
 def empty_padded(
     *,
     batch_size: int,
@@ -213,20 +235,17 @@ def empty_padded(
     max_game_len: int,
     spec: dict[str, tuple[tuple[int, ...], np.dtype[Any]]],
 ) -> PaddedCarry:
-    """The zero :class:`PaddedCarry` of the shape ``spec`` implies -- the eqx
-    deserialisation template, and what a run with no carry checkpoints."""
-    env = BatchedSettlrlEnv(
-        batch_size=batch_size, seed=0, reward="sparse", n_players=n_players,
-        track_beliefs=True, track_ordering=track_ordering,
+    """The zero :class:`PaddedCarry` ``spec`` implies (``present`` = 0): the eqx
+    deserialisation template, and what a run with no live pool checkpoints."""
+    env = _make_env(
+        batch_size=batch_size, seed=0, n_players=n_players,
+        track_ordering=track_ordering,
     )  # fmt: skip
-    pending = {
-        k: np.zeros((batch_size, max_game_len, *shape), dt) for k, (shape, dt) in spec.items()
-    }  # fmt: skip
-    pending["seat"] = np.zeros((batch_size, max_game_len), np.int32)
+    pending, pending_len = _empty_pending(batch_size, max_game_len, spec)
     return PaddedCarry(
         env=_env_arrays(env),
         pending=pending,
-        pending_len=np.zeros((batch_size,), np.int32),
+        pending_len=pending_len,
         key=np.asarray(jax.random.key_data(jax.random.key(0))),
         surplus=np.zeros((), np.int32),
         track_ordering=np.asarray(int(track_ordering), np.int32),
@@ -238,16 +257,8 @@ def to_padded(carry: SelfPlayCarry, max_game_len: int) -> PaddedCarry:
     """``carry`` in its fixed-shape checkpointable form. ``max_game_len`` must be
     the one self-play trims at, so no lane can overflow the pad."""
     assert carry.spec, "an unplayed carry has no recorded-field spec to pad"
-    batch_size = len(carry.pending)
     obs_keys = [k for k in carry.spec if k not in _DERIVED_KEYS]
-    padded = empty_padded(
-        batch_size=batch_size,
-        n_players=carry.env.n_players,
-        track_ordering=carry.env.track_ordering,
-        max_game_len=max_game_len,
-        spec=carry.spec,
-    )
-    pend, lens = padded.pending, padded.pending_len
+    pend, lens = _empty_pending(len(carry.pending), max_game_len, carry.spec)
     for lane, rows in enumerate(carry.pending):
         n = len(rows)
         assert n <= max_game_len, f"lane {lane} holds {n} rows past the pad"
@@ -262,10 +273,13 @@ def to_padded(carry: SelfPlayCarry, max_game_len: int) -> PaddedCarry:
         if "q" in pend:
             pend["q"][lane, :n] = [r[4] for r in rows]
         pend["train_policy"][lane, :n] = [r[5] for r in rows]
-    return padded._replace(
+    return PaddedCarry(
         env=_env_arrays(carry.env),
+        pending=pend,
+        pending_len=lens,
         key=np.asarray(jax.random.key_data(carry.key)),
         surplus=np.asarray(carry.surplus, np.int32),
+        track_ordering=np.asarray(int(carry.env.track_ordering), np.int32),
         present=np.ones((), np.int32),
     )
 
@@ -380,9 +394,9 @@ def self_play(
     env_steps = 0
     trimmed = 0
     if carry is None:
-        env = BatchedSettlrlEnv(
-            batch_size=batch_size, seed=seed, reward="sparse",
-            n_players=n_players, track_beliefs=True, track_ordering=track_ordering,
+        env = _make_env(
+            batch_size=batch_size, seed=seed,
+            n_players=n_players, track_ordering=track_ordering,
         )  # fmt: skip
         pending: list[list[PendingRow]] = [[] for _ in range(batch_size)]
         spec: dict[str, tuple[tuple[int, ...], np.dtype[Any]]] = {}

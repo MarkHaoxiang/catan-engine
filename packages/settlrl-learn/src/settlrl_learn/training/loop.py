@@ -163,11 +163,8 @@ _SELFPLAY_N_PLAYERS = 2
 
 def carry_template(backend: Backend, cfg: LearnConfig) -> PaddedCarry:
     """The zero :class:`~settlrl_learn.training.selfplay.PaddedCarry` a run of
-    ``cfg`` checkpoints: the eqx template that resume deserialises into, and what
-    stands in before (or without) a live pool.
-
-    A non-persistent run pads to zero rows -- one structure either way, but only
-    the flag that keeps games alive pays for the pad."""
+    ``cfg`` checkpoints: the eqx template resume deserialises into, and what
+    stands in without a live pool. A non-persistent run pads to zero rows."""
     layout, state = make_board(batch_size=1, seed=0, n_players=_SELFPLAY_N_PLAYERS)
     one = jax.tree.map(lambda x: x[0], (layout, state))
     obs = jax.eval_shape(backend.observe, one[0], one[1], jnp.int32(0))
@@ -216,12 +213,19 @@ def learn(
         sample_batch_size=cfg.optim.batch_size, add_batches=True,
     )  # fmt: skip
     net0 = backend.init(jax.random.key(cfg.seed))
-    zero_carry = carry_template(backend, cfg)
+    zero_carry: PaddedCarry | None = carry_template(backend, cfg)
     fresh_state = RunState(
         net0, backend.init_opt(optimizer, net0),
         buffer.init(backend.empty_item()), jnp.int32(0), jnp.float32(-1.0), zero_carry,
     )  # fmt: skip
-    state = load_run_state(resume_from, fresh_state) if resume_from else fresh_state
+    # A non-persistent run never reads the pool: a `None` template carry skips
+    # that section, which a persistent checkpoint's pad would otherwise fail on.
+    template = (
+        fresh_state
+        if cfg.selfplay.persistent
+        else fresh_state._replace(selfplay_carry=None)
+    )
+    state = load_run_state(resume_from, template) if resume_from else fresh_state
     net, opt_state, buf_state = state.net, state.opt_state, state.buffer_state
     best, start = float(state.best), int(state.iteration)
     # The pool the checkpoint left in flight (a pre-carry or fresh state has
@@ -231,7 +235,11 @@ def learn(
         if cfg.selfplay.persistent and bool(state.selfplay_carry.present)
         else None
     )
-    del state, fresh_state  # the padded carry is large; keep only the live one
+    del state, fresh_state, template  # the padded carry is large: keep one copy
+    if cfg.selfplay.persistent:
+        # Every persistent checkpoint pads the live carry, so the full-size zero
+        # template has no reader left.
+        zero_carry = None
     ckpt = Path(checkpoint_dir) / "runstate.eqx" if checkpoint_dir else None
 
     step = backend.make_step(optimizer)
@@ -395,17 +403,18 @@ def learn(
                 best = max(best, am["arena_winrate"])
 
         if ckpt is not None and (i + 1) % cfg.checkpoint_every == 0:
-            pool = (
-                zero_carry
-                if carry is None
-                else to_padded(carry, cfg.selfplay.max_game_len)
-            )
+            if carry is not None:
+                pool = to_padded(carry, cfg.selfplay.max_game_len)
+            else:
+                assert zero_carry is not None  # only persistent runs drop it
+                pool = zero_carry
             save_run_state(
                 ckpt,
                 RunState(
                     net, opt_state, buf_state, jnp.int32(i + 1), jnp.float32(best), pool
                 ),
             )
+            del pool  # the next write allocates its own pad
         if bar is not None:
             bar.set_postfix(
                 {
