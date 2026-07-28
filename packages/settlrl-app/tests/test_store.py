@@ -177,12 +177,15 @@ def test_restore_is_faithful_for_a_random_fallback_game(tmp_path: Path) -> None:
     assert before == after  # identical, not a re-sampled divergence
 
 
-def _bot_game(seed: int, kinds: list[str]) -> GameSession:
+def _bot_game(seed: int, kinds: list[str], vp: int = 5) -> GameSession:
+    # A low win threshold: these drive a full game in-process purely to reach a
+    # finished, rated state -- not to exercise the standard VP target.
     return GameSession(
         seed=seed,
         n_players=len(kinds),
         seats=kinds,
         external_kinds=frozenset(kinds),
+        victory_points_to_win=vp,
     )
 
 
@@ -284,7 +287,7 @@ def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
                 "claim": "none",
             },
         ).json()["id"]
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + 12
         moves_at_shutdown = 0
         while time.monotonic() < deadline:
             snap = c1.get(f"/api/games/{game}").json()
@@ -300,7 +303,7 @@ def test_restored_bot_game_resumes_playing(tmp_path: Path) -> None:
     with TestClient(
         create_app(state_dir=str(tmp_path), bot_delay=0.0, providers=bot_registry())
     ) as c2:
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + 12
         body = c2.get(f"/api/games/{game}").json()
         while time.monotonic() < deadline:
             body = c2.get(f"/api/games/{game}").json()

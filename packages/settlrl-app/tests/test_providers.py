@@ -218,7 +218,7 @@ def _drive_to_terminal(client: TestClient, body: dict[str, object]) -> dict[str,
     snap: dict[str, Any] = {}
     # Wall-clock deadline, not a poll count: loaded CI runners need far
     # longer than a dev machine to drive a full game.
-    deadline = time.monotonic() + 120
+    deadline = time.monotonic() + 40
     while time.monotonic() < deadline:
         snap = client.get(f"/api/games/{gid}").json()
         if snap["status"]["terminal"]:

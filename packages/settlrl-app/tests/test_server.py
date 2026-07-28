@@ -231,7 +231,7 @@ def test_turn_timeout_auto_advances_an_idle_human_turn() -> None:
         httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30) as http,
     ):
         game, _ = _start_all_human(http)
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + 10  # turn_timeout=0.2s; a generous margin
         body = http.get(f"/api/games/{game}").json()
         while time.monotonic() < deadline:
             body = http.get(f"/api/games/{game}").json()

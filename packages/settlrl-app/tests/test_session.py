@@ -65,7 +65,12 @@ def test_unknown_seat_kind_is_rejected() -> None:
 
 
 def test_all_bot_game_waits_on_a_bot_and_plays_out() -> None:
-    sess = GameSession(seed=0, seats=["random"] * 4, external_kinds=_BOTS)
+    # A low win threshold: the property under test is that no human seat acts
+    # and the game still plays to a terminal, not the standard 4p VP target
+    # (which random play takes far longer to reach).
+    sess = GameSession(
+        seed=0, seats=["random"] * 4, external_kinds=_BOTS, victory_points_to_win=5
+    )
     assert not sess.status().your_turn  # no human seat acts
     _drive_to_completion(sess)
     assert sess.status().terminal and sess.status().winner is not None

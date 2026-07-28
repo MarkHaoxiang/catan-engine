@@ -122,9 +122,11 @@ def test_join_ties_the_seat_to_the_account(client: TestClient) -> None:
     assert snap["your_seats"] == [seat]
 
 
-def test_finished_owned_game_appears_in_history_and_record_is_served() -> None:
-    """A finished game the account owns a seat in shows up in /api/me/history and
-    its record is still downloadable — for the owner only."""
+def test_finished_game_updates_history_and_leaderboard() -> None:
+    """A finished game the account owns a seat in shows up in /api/me/history
+    (record downloadable, for the owner only) and rates both the account (by
+    handle) and the bot on the public per-player-count leaderboard -- one
+    drive to terminal covers both journalled write-behind effects."""
     rng = random.Random(0)
     with (
         tempfile.TemporaryDirectory() as state_dir,
@@ -132,8 +134,10 @@ def test_finished_owned_game_appears_in_history_and_record_is_served() -> None:
             create_app(state_dir=state_dir, bot_delay=0.0, providers=bot_registry())
         ) as client,
     ):
-        h = _bearer(_token(client, "h@example.com"))
-        game, _ = start_game(client, ["human", "random"], headers=h, seed=3)
+        h = _bearer(_token(client, "champ@example.com"))
+        # A low win threshold: the finish/rating machinery under test doesn't
+        # depend on the standard 15-VP duel length, only on reaching terminal.
+        game, _ = start_game(client, ["human", "random"], headers=h, seed=3, vp=5)
 
         # Play the human seat (random legal moves) while the driver plays the
         # bot, until the game ends.
@@ -168,32 +172,7 @@ def test_finished_owned_game_appears_in_history_and_record_is_served() -> None:
         assert client.get(f"/api/games/{game}/record").status_code == 200
         assert client.post(f"/api/games/{game}/replay").status_code == 200
 
-
-def test_leaderboard_rates_accounts_and_bots() -> None:
-    """A finished human-vs-bot game lands the account (by handle) and the bot on
-    the public per-player-count leaderboard."""
-    rng = random.Random(0)
-    with (
-        tempfile.TemporaryDirectory() as state_dir,
-        TestClient(
-            create_app(state_dir=state_dir, bot_delay=0.0, providers=bot_registry())
-        ) as client,
-    ):
-        h = _bearer(_token(client, "champ@example.com"))
-        game, _ = start_game(client, ["human", "random"], headers=h, seed=3)
-
-        for _ in range(6000):
-            snap = client.get(f"/api/games/{game}", headers=h).json()
-            if snap["status"]["terminal"]:
-                break
-            if snap["status"]["your_turn"] and snap["actions"]:
-                flat = rng.choice(snap["actions"])["flat"]
-                client.post(f"/api/games/{game}/action", json={"flat": flat}, headers=h)
-            else:
-                time.sleep(0.01)
-        assert client.get(f"/api/games/{game}", headers=h).json()["status"]["terminal"]
-
-        # The rating update is journalled write-behind; poll until it lands.
+        # The rating update is journalled write-behind too; poll until it lands.
         board: list[dict[str, object]] = []
         for _ in range(100):
             board = client.get("/api/leaderboard").json()  # public: no auth
