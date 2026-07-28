@@ -13,17 +13,18 @@ kernel timing does not depend on trained weights.
   search (`make_net_search(64)`) on a mid-game batch, swept over batch sizes
   `N` in {64, 256}. This is `search_step_ms`, the unit the parallel-descent
   work moves; `search_step / (64 * net_fwd)` is the batching-headroom ratio.
-- **`test_selfplay_window[dev]`** — `bench_selfplay` at a reduced budget
-  (`samples=256, batch=64, repeats=1, warmup=1`); its reported rates
-  (`samples_per_s` / `moves_per_s` / `sims_per_s`) surface via
-  `benchmark.extra_info`.
+- **`test_selfplay_window[dev]`** — one self-play window at a reduced budget
+  (`samples=256, batch=64`); its per-call rates (`samples_per_s` /
+  `moves_per_s` / `sims_per_s`) surface via `benchmark.extra_info`.
 - **`test_optimizer_step[dev]`** — one warmed `backend.make_step` dispatch on
   a broadcast zero batch at `batch_size=1024`.
 
 All swept over devices: `cpu` always, plus `cuda` when an NVIDIA GPU is
 usable (the workspace installs the CUDA jaxlib by default on Linux) —
-otherwise the CUDA variants skip. Each variant pins its device explicitly,
-and JIT is warmed up before every timed region.
+otherwise the CUDA variants skip. Each variant pins its device explicitly.
+JIT is warmed up before every timed region, so the four headline stats
+(min/mean/median, what `--benchmark-compare` reads) are all steady-state
+throughput, not compile time.
 
 These tests carry the `benchmark` marker and are **deselected from the
 default `pytest` run**. Run them from the repo root via the shared wrapper

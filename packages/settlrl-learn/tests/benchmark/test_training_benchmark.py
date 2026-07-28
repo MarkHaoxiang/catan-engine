@@ -11,9 +11,12 @@ kernel timing does not depend on trained weights:
 - ``test_search_step`` -- one warmed dispatch of the vmapped net search
   (``make_net_search(64)``) on a mid-game batch, B in {64, 256}. This is
   ``search_step_ms``, the unit the parallel-descent work will move.
-- ``test_selfplay_window`` -- :func:`~settlrl_learn.training.bench_selfplay`
-  at a reduced budget, timed as a single pedantic round (it does its own
-  warmup/repeat internally).
+- ``test_selfplay_window`` -- one warmed self-play window
+  (:func:`~settlrl_learn.training.self_play` over
+  :func:`~settlrl_learn.training.selfplay_callables`) at a reduced budget.
+  The XLA-compiling call runs untimed (``benchmark.pedantic``'s ``setup``),
+  so the headline stat is steady-state throughput, on the same footing as
+  the other three benchmarks here.
 - ``test_optimizer_step`` -- one warmed ``backend.make_step`` dispatch on a
   broadcast zero batch at ``batch_size=1024``.
 
@@ -25,6 +28,7 @@ JIT is warmed up before each timed region.
 from __future__ import annotations
 
 import functools
+import time
 from typing import Any, cast
 
 import equinox as eqx
@@ -40,8 +44,8 @@ from settlrl_learn.training import (
     GNNBackend,
     LearnConfig,
     SelfPlayConfig,
-    bench_selfplay,
     make_optimizer,
+    self_play,
     selfplay_callables,
 )
 from settlrl_learn.training.config import OptimConfig
@@ -149,10 +153,14 @@ _SELFPLAY_BATCH = 64
 @pytest.mark.benchmark
 @pytest.mark.parametrize("device", _DEVICES)
 def test_selfplay_window(benchmark: Any, device: str) -> None:
-    """Throughput of one self-play window (:func:`bench_selfplay`) at a
-    reduced budget -- the loop's dominant per-iteration cost. ``bench_selfplay``
-    already runs its own warmup/repeat, so this times a single pedantic round
-    and surfaces its reported rates via ``benchmark.extra_info``."""
+    """Throughput of one warmed self-play window (:func:`self_play` over
+    :func:`selfplay_callables`) at a reduced budget -- the loop's dominant
+    per-iteration cost. ``setup`` (untimed) pays the XLA compile with one
+    self-play call; ``target`` (timed) runs exactly one more, already-warmed
+    collection, so the pytest-benchmark headline is steady-state throughput,
+    not compile-inclusive wall time. The rates ``bench_selfplay`` would report
+    (samples/moves/sims per second, computed from the same timed call) surface
+    via ``benchmark.extra_info``."""
     benchmark.group = f"selfplay_window[{device}]"
     with jax.default_device(jax.devices(device)[0]):
         backend = GNNBackend(_NET_CFG)
@@ -161,14 +169,45 @@ def test_selfplay_window(benchmark: Any, device: str) -> None:
             n_iterations=1,
             selfplay=SelfPlayConfig(samples=_SELFPLAY_SAMPLES, batch=_SELFPLAY_BATCH),
         )
+        calls = selfplay_callables(backend, cfg, net)
+        search = functools.partial(
+            calls.make_net_search(cfg.search.num_simulations),
+            eqx.partition(net, eqx.is_array)[0],
+        )
+
+        def play(seed: int) -> tuple[int, int, int]:
+            samples, stats = self_play(
+                search, n_samples=cfg.selfplay.samples,
+                observe_of=calls.observe_of, view_of=calls.view_of,
+                setup_search=calls.setup_search,
+                batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
+                seed=seed, record_value=cfg.value_blend.max > 0,
+                track_ordering=cfg.search.ordered,
+                max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
+            )  # fmt: skip
+            return samples["value"].shape[0], stats.env_steps, stats.discarded
+
+        def warmup() -> None:
+            # pedantic's `setup` runs untimed, before instrumentation starts --
+            # this call pays the XLA compile. Its return value must be falsy (a
+            # truthy return is unpacked as `(args, kwargs)` for `timed`).
+            play(seed=1000)
+
         result: dict[str, float] = {}
 
-        def run() -> None:
+        def timed() -> None:
+            t0 = time.perf_counter()
+            n_samples, env_steps, discarded = play(seed=0)
+            dt = time.perf_counter() - t0
+            moves = env_steps * cfg.selfplay.batch
             result.update(
-                bench_selfplay(backend, net, cfg, warmup=1, repeats=1, seed=0)
-            )
+                samples_per_s=n_samples / dt, moves_per_s=moves / dt,
+                sims_per_s=(moves / dt) * cfg.search.num_simulations,
+                samples=float(n_samples), env_steps=float(env_steps),
+                discarded=float(discarded),
+            )  # fmt: skip
 
-        benchmark.pedantic(run, rounds=1, iterations=1)
+        benchmark.pedantic(timed, setup=warmup, rounds=1, iterations=1)
         benchmark.extra_info.update(result)
 
 
