@@ -29,8 +29,11 @@ logs per framework), and `experiments/JOURNAL.md` indexes one verdict line
 per concluded finding. Prefer extending a framework's variants over
 scaffolding a new number (`uv run python experiments/new.py "<title>"` for
 genuinely new classes). Strength claims gate through `settlrl-agents bench` or
-an in-run match with the threshold asserted in code. Record evidence there,
-not in package docs — CLAUDE.md files cite experiment numbers.
+an in-run match with the threshold asserted in code. Throughput claims gate
+through experiment 0004's `bench_throughput` preset (pinned config + frozen
+anchor) — quote `result.json` before/after at the same config. Record
+evidence there, not in package docs — CLAUDE.md files cite experiment
+numbers.
 
 ## Checks
 

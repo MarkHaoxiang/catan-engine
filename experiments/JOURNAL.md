@@ -52,3 +52,8 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   not edge-counting (on |count-longest|≥2 cases it predicts true longest 7.2 not
   count 11.1) but is depth-limited as expected — 1 layer fails (R² 0.58), depth 2
   →0.92, then plateaus; greedy road 0.99 was an easy near-simple-path artefact.
+- 0004 bench_throughput baseline (2026-07-28). Pinned self-play throughput at
+  the frozen az0 net (overnight shape: B=256, 64 sims): 193 samples/s
+  (741 moves/s, 47438 sims/s), 72.8% of searched positions discarded at the
+  iteration boundary — the optimization track's before number (run
+  runs/0004_alphazero/2026-07-28T065337Z, commit 2811210).
