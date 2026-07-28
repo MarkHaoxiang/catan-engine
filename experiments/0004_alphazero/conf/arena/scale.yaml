@@ -1,4 +1,4 @@
-games: 40
+games: 128          # ~= the eval batch (the evaluator overshoots to ~batch anyway)
 every: 10           # arena ~297s each; every 10 keeps eval < ~25% of wall-clock
 batch: 128
 sims: 24
@@ -7,3 +7,5 @@ opponents: [lookahead, random]
 anchor_elos:
   lookahead: 0.0
   random: -800.0
+opponent_every:
+  random: 5         # random has been 1.0 from iter ~9 on -- sample it, not every round

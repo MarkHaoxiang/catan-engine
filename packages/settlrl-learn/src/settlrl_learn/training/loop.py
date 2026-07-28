@@ -323,7 +323,11 @@ def learn(
             # Fixed seed (no +i): every checkpoint faces the *same* games, so the
             # arena curve is paired across iterations -- only the net varies and
             # the dice/board luck differences out (the big variance cut).
-            am = run_arena(backend, net, cfg.arena, seed=cfg.seed + 20_000)
+            round_index = (i + 1) // cfg.arena.every
+            am = run_arena(
+                backend, net, cfg.arena, seed=cfg.seed + 20_000,
+                round_index=round_index,
+            )  # fmt: skip
             metrics.update(am)
             metrics["t_arena"] = time.perf_counter() - t2
             if "arena_winrate" in am:

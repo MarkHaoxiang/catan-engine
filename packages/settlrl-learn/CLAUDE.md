@@ -149,7 +149,11 @@ deps only because this subpackage uses them.
     reports `arena_winrate` / `arena_vs_<opp>` **plus `arena_elo`** — the MLE Elo
     (`training/elo.py::anchored_elo`) on the fixed `cfg.arena.anchor_elos` scale
     (heuristic pinned at 0 = the gate; random well below) — **and `arena_elo_se`**,
-    its standard error (`anchored_elo_se`, Fisher information at the MLE). The
+    its standard error (`anchored_elo_se`, Fisher information at the MLE).
+    `cfg.arena.opponent_every` (opponent -> N) skips an opponent on rounds where
+    `run_arena`'s `round_index` (the loop's count of arena invocations) isn't a
+    multiple of N, saving wall-clock on anchors that no longer carry information
+    (e.g. `random`, which pins at 1.0 winrate early). The
     loop holds the arena **seed fixed across iterations** (no `+i`), so every
     checkpoint faces the same games and the curve is paired (the dice/board luck
     differences out)

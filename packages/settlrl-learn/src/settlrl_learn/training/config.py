@@ -116,6 +116,10 @@ class ArenaConfig(_Group):
     anchor_elos: dict[str, float] = Field(
         default_factory=lambda: {"lookahead": 0.0, "random": -800.0}
     )
+    opponent_every: dict[str, int] = Field(default_factory=dict)
+    """Opponent name -> play it only every Nth arena round (absent, or 1, plays
+    every round). ``run_arena``'s ``round_index`` counts arena invocations, not
+    training iterations."""
 
 
 class LearnConfig(_Group):

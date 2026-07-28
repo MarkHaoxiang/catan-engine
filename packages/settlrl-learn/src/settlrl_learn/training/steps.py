@@ -82,17 +82,25 @@ def evaluate(backend: Backend, net: Any, ev: Samples) -> dict[str, float]:
 
 
 def run_arena(
-    backend: Backend, net: Any, cfg: ArenaConfig, *, seed: int
+    backend: Backend, net: Any, cfg: ArenaConfig, *, seed: int, round_index: int
 ) -> dict[str, float]:
     """Play the net against each configured opponent; ``lookahead`` -> the gate
     metric ``arena_winrate``, others -> ``arena_vs_<opponent>``, plus ``arena_elo``
     -- the MLE Elo on the fixed ``anchor_elos`` scale -- and ``arena_elo_se``, its
     standard error. Opponents get well-separated seeds (``seed + j*10_000``); the
     loop holds ``seed`` fixed across iterations so every checkpoint faces the same
-    games (a paired strength curve)."""
+    games (a paired strength curve).
+
+    ``round_index`` counts arena invocations (not training iterations); an
+    opponent with ``cfg.opponent_every[opp] = N`` is skipped unless
+    ``round_index % N == 0``, contributing no metric and no Elo input that
+    round."""
     metrics: dict[str, float] = {}
     elo_inputs: list[tuple[float, float, int]] = []
     for j, opp in enumerate(cfg.opponents):
+        every = cfg.opponent_every.get(opp, 1)
+        if every > 1 and round_index % every != 0:
+            continue
         res = arena(
             backend, net, opponent=opp, n_games=cfg.games,
             num_simulations=cfg.sims, batch_size=cfg.batch,

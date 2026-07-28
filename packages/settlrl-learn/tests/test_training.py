@@ -505,7 +505,7 @@ def test_run_arena_uses_real_counts_for_elo_and_reports_se(monkeypatch: Any) -> 
         opponents=["lookahead", "random"],
         anchor_elos={"lookahead": 0.0, "random": -800.0},
     )
-    metrics = run_arena(MLPBackend((16,)), object(), cfg, seed=0)
+    metrics = run_arena(MLPBackend((16,)), object(), cfg, seed=0, round_index=1)
     real_inputs = [(0.0, 30.0, 50), (-800.0, 10.0, 20)]
     nominal_inputs = [
         (0.0, 0.6 * 40, 40),
@@ -515,6 +515,43 @@ def test_run_arena_uses_real_counts_for_elo_and_reports_se(monkeypatch: Any) -> 
     assert metrics["arena_elo"] == anchored_elo(real_inputs)
     assert metrics["arena_elo"] != anchored_elo(nominal_inputs)
     assert metrics["arena_elo_se"] == anchored_elo_se(real_inputs)
+
+
+def test_run_arena_opponent_every_skips_off_rounds(monkeypatch: Any) -> None:
+    # opponent_every={"random": 5} plays random only on round_index multiples of
+    # 5; lookahead (absent from the map) plays every round. A skipped opponent
+    # contributes no arena_vs_<opp> metric and no Elo input that round.
+    calls: list[str] = []
+    results = {
+        "lookahead": ArenaResult(wins=30.0, episodes=50),
+        "random": ArenaResult(wins=10.0, episodes=20),
+    }
+
+    def _fake_arena(*a: Any, opponent: str, **k: Any) -> ArenaResult:
+        calls.append(opponent)
+        return results[opponent]
+
+    monkeypatch.setattr("settlrl_learn.training.steps.arena", _fake_arena)
+    cfg = ArenaConfig(
+        games=40,
+        opponents=["lookahead", "random"],
+        anchor_elos={"lookahead": 0.0, "random": -800.0},
+        opponent_every={"random": 5},
+    )
+    backend = MLPBackend((16,))
+
+    for round_index in range(1, 5):
+        calls.clear()
+        metrics = run_arena(backend, object(), cfg, seed=0, round_index=round_index)
+        assert calls == ["lookahead"]
+        assert "arena_vs_random" not in metrics
+        assert metrics["arena_elo"] == anchored_elo([(0.0, 30.0, 50)])
+        assert metrics["arena_elo_se"] == anchored_elo_se([(0.0, 30.0, 50)])
+
+    calls.clear()
+    metrics = run_arena(backend, object(), cfg, seed=0, round_index=5)
+    assert calls == ["lookahead", "random"]
+    assert metrics["arena_vs_random"] == results["random"].winrate
 
 
 def test_self_play_no_pcr_marks_all_full() -> None:
