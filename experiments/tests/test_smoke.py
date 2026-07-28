@@ -1,11 +1,17 @@
-"""End-to-end smoke tests: each framework runs at trivial budgets.
+"""Smoke tests: composition checks plus one tiny end-to-end run per framework.
 
-These exercise the whole plumbing of every experiment framework — config
-resolution, the data/optimisation path, the bench gate, the saved verdict —
-at budgets too small to mean anything, so they catch breakage (import errors,
-shape bugs, a renamed seam) without paying for a real run. They write into a
-``tmp_path`` ``Run`` rather than ``runs/`` and never assert a strength claim,
-only that the framework completes and records a verdict.
+Most of these are config-composition checks — every named variant/preset
+resolves and validates (catches a typo'd knob or a renamed seam in seconds,
+without paying for a JAX compile). The actual training loop, backends, and
+search are covered end-to-end at tiny budgets by the owning packages
+(``settlrl-learn``'s ``test_training.py``, ``settlrl-search``'s
+``test_ismcts.py``); a framework's unique surface is only the composition
+layer (hydra/`resolve` config groups, `run.py` wiring, the bench gate, a
+recorded verdict), so each framework keeps at most one genuinely tiny
+end-to-end run to prove that layer, plus config-only checks for the rest of
+its variants. They write into a ``tmp_path`` ``Run`` rather than ``runs/``
+and never assert a strength claim, only that the framework completes and
+records a verdict.
 """
 
 from __future__ import annotations
@@ -14,7 +20,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import load_run
+from conftest import EXPERIMENTS, load_run
 from settlrl_learn.experiment import Run
 
 
@@ -31,7 +37,6 @@ def test_0001_bench_smoke(tmp_path: Path) -> None:
     _verdict(tmp_path)
 
 
-@pytest.mark.slow
 def test_0002_value_fitting_smoke(tmp_path: Path) -> None:
     run = load_run("0002_linear_value_fitting")
     cfg = run.ValueFittingConfig.resolve({**run.VARIANTS["smoke"], "variant": "smoke"})
@@ -39,7 +44,12 @@ def test_0002_value_fitting_smoke(tmp_path: Path) -> None:
     _verdict(tmp_path)
 
 
-@pytest.mark.slow
+def test_0002_variants_resolve() -> None:
+    run = load_run("0002_linear_value_fitting")
+    for name, variant in run.VARIANTS.items():
+        run.ValueFittingConfig.resolve({**variant, "variant": name})
+
+
 def test_0003_neural_board_architectures_smoke(tmp_path: Path) -> None:
     run = load_run("0003_neural_board_architectures")
     cfg = run.NeuralBoardArchitecturesConfig.resolve(run.VARIANTS["smoke"])
@@ -47,6 +57,17 @@ def test_0003_neural_board_architectures_smoke(tmp_path: Path) -> None:
     _verdict(tmp_path)
 
 
+def test_0003_variants_resolve() -> None:
+    run = load_run("0003_neural_board_architectures")
+    for variant in run.VARIANTS.values():
+        run.NeuralBoardArchitecturesConfig.resolve(variant)
+
+
+# The one genuinely tiny end-to-end 0004 run: the mlp path (not gnn -- gnn
+# training is covered end-to-end by settlrl-learn's
+# test_learn_resume_bit_exact_gnn, and chance/ordered search by
+# settlrl-search's test_ismcts.py, so a second full run here would only
+# re-prove the arena/hydra wiring the mlp path already proves).
 @pytest.mark.slow
 def test_0004_alphazero_smoke(tmp_path: Path) -> None:
     run = load_run("0004_alphazero")
@@ -55,15 +76,6 @@ def test_0004_alphazero_smoke(tmp_path: Path) -> None:
     _verdict(tmp_path)
 
 
-@pytest.mark.slow
-def test_0004_alphazero_gnn_smoke(tmp_path: Path) -> None:
-    run = load_run("0004_alphazero")
-    cfg = run.compose_config(["+experiment=gnn_smoke"])
-    run.run_experiment(Run(tmp_path), cfg)
-    _verdict(tmp_path)
-
-
-@pytest.mark.slow
 def test_0004_bench_throughput_smoke(tmp_path: Path) -> None:
     run = load_run("0004_alphazero")
     cfg = run.compose_config(
@@ -80,6 +92,20 @@ def test_0004_bench_throughput_smoke(tmp_path: Path) -> None:
     result = json.loads((tmp_path / "result.json").read_text())
     assert result["verdict"] == "recorded"
     assert "samples_per_s" in result
+
+
+def test_0004_experiment_presets_compose() -> None:
+    # Every conf/experiment/*.yaml (gnn_smoke included -- its full training run
+    # is not re-proven here, see test_0004_alphazero_smoke's comment) resolves
+    # and validates into AlphaZeroConfig. Cheap (hydra compose + pydantic, no
+    # JAX), and broader than running any one variant: catches a typo'd knob in
+    # any preset, not just the ones a smoke happens to execute.
+    run = load_run("0004_alphazero")
+    conf_dir = EXPERIMENTS / "0004_alphazero" / "conf" / "experiment"
+    presets = sorted(p.stem for p in conf_dir.glob("*.yaml"))
+    assert presets  # guard against a silently-empty glob
+    for name in presets:
+        run.compose_config([f"+experiment={name}"])
 
 
 def test_0004_scale_presets_compose() -> None:

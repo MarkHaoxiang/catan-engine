@@ -39,20 +39,33 @@ does not pull `pydantic`/`omegaconf`. A framework's *same-dir* helpers (e.g.
 
 ## Testing (`tests/`, mypy)
 
-`tests/test_smoke.py` runs every framework end-to-end at trivial budgets
-(`conftest.load_run` imports a `run.py` by path; the digit-prefixed dirs
-aren't packages). A smoke asserts only a recorded verdict, never strength.
-Mark a smoke `slow` when JAX recompiles dominate (CI-only; pre-commit runs
-`-m "not slow"`). A smoke variant must shrink **every** budget group: 0004's
-`smoke`/`gnn_smoke` once left `arena` at its production defaults (48 sims, 16
-considered, batch 16, both anchor opponents seat-swapped) while the rest was
-trivial, and the arena then cost 895s of a 907s iteration — the whole reason CI
-never finished the step. Cold-cache cost of the suite on runner-class hardware
-(4 vCPU, `-n 2`) is ~8 minutes; CI caps the step at 25. `mypy_experiments.sh` checks each framework dir separately
-(the `run.py` modules would collide on one invocation) plus `new.py` and the
-tests; the shared harness is checked by the agents package mypy. New
-frameworks: add a `smoke` variant and a `test_<nnnn>_*` case, and the mypy loop
-picks the dir up automatically.
+The whole suite (`uv run pytest experiments/tests`, no `-m` filter) must fit
+~2-3 minutes cold — that budget is the design constraint, not an aspiration.
+It holds because `tests/test_smoke.py` is mostly config-composition checks:
+every named variant/preset for a framework resolves and validates
+(`Config.resolve` / `compose_config`), which is hydra+pydantic only, no JAX,
+so it costs milliseconds per variant and still catches a typo'd knob or a
+renamed seam. The actual training loop, backends, and search already have
+end-to-end coverage at tiny budgets in the owning packages
+(`settlrl-learn`'s `test_training.py` for both the mlp and gnn backends
+including bit-exact resume, `settlrl-search`'s `test_ismcts.py` for
+chance/ordered search) — a framework's *unique* surface here is only the
+composition layer (config groups, `run.py` wiring, the bench gate, a recorded
+verdict), so each framework keeps at most one genuinely tiny real end-to-end
+run to prove that layer, never one per variant. (`conftest.load_run` imports
+a `run.py` by path; the digit-prefixed dirs aren't packages.) A smoke asserts
+only a recorded verdict, never strength.
+
+Keep any real end-to-end run's budgets trivial in **every** group — 0004's
+`smoke` once left `arena` at production defaults while the rest was trivial,
+and the arena alone cost 895s of a 907s iteration. Mark a real run `slow` if
+it's still not pre-commit-cheap (pre-commit runs `-m "not slow"`); a pure
+compose/resolve check never needs the marker. `mypy_experiments.sh` checks
+each framework dir separately (the `run.py` modules would collide on one
+invocation) plus `new.py` and the tests; the shared harness is checked by the
+agents package mypy. New frameworks: add a variants-resolve check, at most one
+tiny end-to-end case, and a `test_<nnnn>_*` name so the mypy loop picks the
+dir up automatically.
 
 ## `0002_linear_value_fitting/` — linear fits over the engineered features
 
