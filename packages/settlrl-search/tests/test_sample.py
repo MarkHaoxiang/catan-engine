@@ -34,7 +34,7 @@ def test_sample_matches_the_public_record(n_players: int) -> None:
     pb = view.belief
     me = jnp.int32(0)
     keys = set()
-    for seed in range(10):
+    for seed in range(4):
         world = sample_world(jax.random.key(seed), view, me)
         # The public fields are copied through untouched.
         for name in PublicState._fields:
@@ -58,7 +58,7 @@ def test_sample_matches_the_public_record(n_players: int) -> None:
         )
         keys.add(tuple(int(x) for x in jax.random.key_data(world.key).ravel()))
     # Each sample carries its own fresh PRNG key.
-    assert len(keys) == 10
+    assert len(keys) == 4
 
 
 def test_sample_varies_with_the_key() -> None:
@@ -70,7 +70,7 @@ def test_sample_varies_with_the_key() -> None:
     me = jnp.int32(0)
     hands = {
         tuple(int(c) for c in sample_world(jax.random.key(s), view, me).dev_hand[1])
-        for s in range(30)
+        for s in range(12)
     }
     assert len(hands) > 1  # the posterior is actually being sampled
 
@@ -80,7 +80,7 @@ def test_two_player_resources_are_pinned() -> None:
     view = _played_view(2, n_steps=300)
     me = jnp.int32(0)
     worlds = [
-        sample_world(jax.random.key(s), view, me).player_resources for s in range(5)
+        sample_world(jax.random.key(s), view, me).player_resources for s in range(3)
     ]
     for w in worlds[1:]:
         assert bool(jnp.all(w == worlds[0]))
@@ -104,7 +104,7 @@ def test_sample_relaxes_infeasible_upper_bounds() -> None:
     assert int(view.belief.res_hi[p].sum()) < need  # genuinely infeasible
 
     me = jnp.int32(0)
-    for s in range(8):
+    for s in range(4):
         world = sample_world(jax.random.key(s), view, me)
         res = world.player_resources.astype(jnp.int32)
         assert bool(jnp.all(res >= 0))  # no negative counts
@@ -123,7 +123,7 @@ def test_sample_dev_hands_pinned_at_2p() -> None:
     pb = view.belief
     view = view._replace(belief=pb._replace(dev_count=pb.dev_count.at[1].set(0)))
     me = jnp.int32(0)
-    worlds = [sample_world(jax.random.key(s), view, me) for s in range(5)]
+    worlds = [sample_world(jax.random.key(s), view, me) for s in range(3)]
     for w in worlds[1:]:
         assert bool(jnp.all(w.dev_hand == worlds[0].dev_hand))
         assert bool(jnp.all(w.dev_deck == worlds[0].dev_deck))

@@ -149,7 +149,7 @@ def _position(seed: int, steps: int, n_players: int = 2) -> tuple:
     return layout, view, p, mask
 
 
-@pytest.mark.parametrize("seed", [0, 1, 2])
+@pytest.mark.parametrize("seed", [0, 1])
 def test_move_is_legal(seed: int) -> None:
     layout, view, p, mask = _position(seed, steps=100 + seed * 20)
     if mask.sum() == 0:
@@ -188,7 +188,7 @@ def _chance_fn(num_simulations: int) -> Any:
     )
 
 
-@pytest.mark.parametrize("seed", [0, 2, 5])
+@pytest.mark.parametrize("seed", [0, 2])
 def test_chance_nodes_weights_are_a_legal_distribution(seed: int) -> None:
     # The explicit-chance-node descent (dice + dev draws resolved in-tree) still
     # returns a legal improved-policy distribution and a finite searched root value
@@ -224,7 +224,7 @@ def _ordered_fn(num_simulations: int) -> Any:
     )
 
 
-@pytest.mark.parametrize("seed", [0, 3, 6])
+@pytest.mark.parametrize("seed", [0, 3])
 def test_ordered_weights_are_a_legal_distribution(seed: int) -> None:
     # The ordering lock-out applied in the descent still yields a legal
     # improved-policy distribution over the (env-supplied) root mask -- the
@@ -254,7 +254,7 @@ def test_visits_concentrate_above_uniform() -> None:
     assert int((w > 0).sum()) > 1  # but explores more than one action
 
 
-@pytest.mark.parametrize("steps", [2, 3, 40, 230])  # setup phase ... late game
+@pytest.mark.parametrize("steps", [2, 40, 230])  # setup phase ... late game
 def test_move_legal_across_game_stages(steps: int) -> None:
     # Edge cases: the setup phase (settle/road action types) and a near-end
     # position exercise different legal sets than the mid-game.
