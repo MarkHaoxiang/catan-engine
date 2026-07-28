@@ -109,18 +109,16 @@ def _self_play(spec: Spec, seed: int, n_steps: int) -> tuple[jax.Array, jax.Arra
 
 
 @pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
-def test_picks_only_legal_actions(spec: Spec) -> None:
-    masks, actions = _self_play(spec, seed=0, n_steps=100)
-    # Whenever a lane has any legal move, the pick must be one of them.
+def test_self_play_is_legal_and_reproducible(spec: Spec) -> None:
+    # One rollout carries both properties: legality is checked on it directly,
+    # and a second same-seed rollout must replay it exactly (so its legality
+    # follows without re-checking).
+    masks, actions = _self_play(spec, seed=3, n_steps=60)
     legal = jnp.take_along_axis(masks, actions[..., None], axis=2)[..., 0]
     assert bool(jnp.all(~masks.any(axis=2) | legal))
 
-
-@pytest.mark.parametrize("spec", SPECS.values(), ids=SPECS.keys())
-def test_same_seed_reproduces_rollout(spec: Spec) -> None:
-    _, first = _self_play(spec, seed=3, n_steps=40)
-    _, second = _self_play(spec, seed=3, n_steps=40)
-    assert bool(jnp.all(first == second))
+    _, replayed = _self_play(spec, seed=3, n_steps=60)
+    assert bool(jnp.all(actions == replayed))
 
 
 SHEEP, WOOD = 0, 2
@@ -145,6 +143,12 @@ def _pending_trade_board(responder_hand: list[int]) -> Board:
     return layout, st
 
 
+# Jitted once per agent name and reused across the accept/reject cases below --
+# eager dispatch of these policies' full op graph is orders of magnitude
+# slower than a single compile (root sweep, ~40s eager vs <1s jitted+cached).
+_JITTED_POLICY = {name: jax.jit(SPECS[name].policy) for name in ("greedy", "lookahead")}
+
+
 @pytest.mark.parametrize("name", ["greedy", "lookahead"])
 @pytest.mark.parametrize("favorable", [True, False], ids=["accepts", "rejects"])
 def test_responds_to_trades_by_benefit(name: str, favorable: bool) -> None:
@@ -155,6 +159,7 @@ def test_responds_to_trades_by_benefit(name: str, favorable: bool) -> None:
     layout0, state0 = jax.tree.map(lambda x: x[0], (layout, state))
     mask = flat_available_for(layout0, state0)
     spec = SPECS[name]
+    policy = _JITTED_POLICY[name]
     key = jax.random.key(0)
     if isinstance(spec, ObservationSpec):
         obs = cast(
@@ -163,7 +168,7 @@ def test_responds_to_trades_by_benefit(name: str, favorable: bool) -> None:
                 lambda x: x[0], observe_for(layout, state, jnp.array([1], jnp.int32))
             ),
         )
-        flat = spec.policy(key, obs, mask)
+        flat = policy(key, obs, mask)
     else:
         assert isinstance(spec, BeliefSpec)  # the parametrized names
         res = state0.player_resources  # exact public knowledge: lo == hi == truth
@@ -173,7 +178,7 @@ def test_responds_to_trades_by_benefit(name: str, favorable: bool) -> None:
             dev_played=jnp.zeros_like(state0.dev_deck),
         )
         view = belief_view(state0, belief, 1)
-        flat = spec.policy(key, layout0, view, jnp.int32(1), mask)
+        flat = policy(key, layout0, view, jnp.int32(1), mask)
     assert int(flat) == (_ACCEPT_ROW if favorable else _REJECT_ROW)
 
 

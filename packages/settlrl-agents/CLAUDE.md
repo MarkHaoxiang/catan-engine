@@ -275,8 +275,10 @@ complete games (`_self_play` drives stateful specs lane by lane, mirroring
 `_evaluate_stepwise`). No per-agent internal-logic
 tests — a new agent just registers in `POLICIES`. settlrl-app's bot seam
 skips `StatefulSpec` families (its `bot_act` is per-move and stateless; a
-stateful seat there needs a per-session agent cache that doesn't exist yet). `sample_world` is
-infrastructure, not a policy, so it gets unit tests (`tests/test_sample.py`).
+stateful seat there needs a per-session agent cache that doesn't exist yet). `sample_world`
+moved to `settlrl-search` along with its unit tests (`settlrl-search`'s
+`tests/test_sample.py`) — it's infrastructure, not a policy, so it never had
+protocol-level tests here.
 `tests/conftest.py` installs the jaxtyping/beartype hook for all
 `settlrl_agents` modules.
 
