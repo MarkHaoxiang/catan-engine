@@ -20,6 +20,11 @@ from settlrl_engine.record import (
     replay,
 )
 
+# Keeps every test in this module on one xdist worker, so the module-scoped
+# record4/record2 fixtures (full games, thousands of steps) are computed once
+# per run instead of once per worker that happens to draw a test from here.
+pytestmark = pytest.mark.xdist_group("record")
+
 
 @pytest.fixture(scope="module")
 def record4() -> GameRecord:

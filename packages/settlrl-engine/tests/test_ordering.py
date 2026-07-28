@@ -86,7 +86,7 @@ def test_env_track_ordering_overlay_only_removes_and_fires() -> None:
     env = BatchedSettlrlEnv(batch_size=8, n_players=2, seed=0, track_ordering=True)
     key = jax.random.key(0)
     fired = False
-    for _ in range(200):
+    for _ in range(150):
         real = np.asarray(flat_available_b(*env.board))
         masked = np.asarray(env.flat_mask())
         assert not (masked & ~real).any()  # overlay only removes

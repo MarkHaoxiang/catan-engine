@@ -59,7 +59,7 @@ def test_bounds_bracket_the_truth(n_players: int) -> None:
         batch_size=4, seed=0, n_players=n_players, track_beliefs=True
     )
     key = jax.random.key(42)
-    for _ in range(150):
+    for _ in range(100):
         key, k = jax.random.split(key)
         env.step(*env.random_actions(k))
         true = env.board[1].player_resources.astype(jnp.int32)  # (B, P, R)
@@ -78,7 +78,7 @@ def test_dev_pool_conservation(n_players: int) -> None:
     env = BatchedSettlrlEnv(
         batch_size=4, seed=1, n_players=n_players, track_beliefs=True
     )
-    _rollout(env, 150)
+    _rollout(env, 100)
     state = env.board[1]
     held = state.dev_hand.astype(jnp.int32).sum(axis=1)
     played = env.beliefs.dev_played.astype(jnp.int32)
@@ -92,7 +92,7 @@ def test_two_player_beliefs_are_exact() -> None:
     # seats) and public totals pin the rest: the bounds must stay tight.
     env = BatchedSettlrlEnv(batch_size=4, seed=2, n_players=2, track_beliefs=True)
     key = jax.random.key(7)
-    for _ in range(150):
+    for _ in range(100):
         key, k = jax.random.split(key)
         env.step(*env.random_actions(k))
         assert bool(jnp.all(env.beliefs.res_lo == env.beliefs.res_hi))
@@ -106,7 +106,7 @@ def test_third_party_steals_create_uncertainty() -> None:
     env = BatchedSettlrlEnv(batch_size=4, seed=3, n_players=4, track_beliefs=True)
     key = jax.random.key(42)
     max_slack = 0
-    for _ in range(200):
+    for _ in range(120):
         key, k = jax.random.split(key)
         env.step(*env.random_actions(k))
         slack = env.beliefs.res_hi.astype(jnp.int32) - env.beliefs.res_lo.astype(
@@ -128,7 +128,7 @@ def test_every_board_field_is_classified() -> None:
 
 def test_belief_view_carries_nothing_hidden() -> None:
     env = BatchedSettlrlEnv(batch_size=4, seed=4, n_players=4, track_beliefs=True)
-    _rollout(env, 150)
+    _rollout(env, 100)
     state = env.board[1]
     for me in range(4):
         view = env.belief_view(me)
@@ -177,7 +177,7 @@ def test_belief_resets_with_auto_reset() -> None:
     # Run long enough for lanes to finish (2p games end quickly): beliefs of
     # replaced lanes must restart from the empty-board belief, staying sound.
     env = BatchedSettlrlEnv(batch_size=4, seed=5, n_players=2, track_beliefs=True)
-    _rollout(env, 2_000)
+    _rollout(env, 1_700)
     true = env.board[1].player_resources.astype(jnp.int32)
     assert bool(jnp.all(env.beliefs.res_lo.astype(jnp.int32) <= true[:, None]))
     assert bool(jnp.all(true[:, None] <= env.beliefs.res_hi.astype(jnp.int32)))

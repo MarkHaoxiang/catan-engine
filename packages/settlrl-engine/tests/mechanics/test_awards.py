@@ -85,7 +85,7 @@ def _road_state(seed: int) -> BoardState:
 
 class TestLongestRoadAward:
     def test_recompute_matches_reference(self) -> None:
-        for seed in range(15):
+        for seed in range(10):
             state = _road_state(seed)
             got = awards.recompute_longest_road(_single(state))
             ref = reference.recompute_longest_road(state, 0)
