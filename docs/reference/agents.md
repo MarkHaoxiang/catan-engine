@@ -1,11 +1,8 @@
 # settlrl-agents
 
-Agents that play the game — heuristics and search — plus a CLI for matches and
-benchmarks, and the bot service that serves their moves over HTTP.
-
-## Policy
-
-::: settlrl_agents.policy
+Agents that play the game — heuristics, and the search agents built on
+settlrl-search — plus a CLI for matches and benchmarks, and the bot service
+that serves their moves over HTTP.
 
 ## Value
 
@@ -18,10 +15,6 @@ benchmarks, and the bot service that serves their moves over HTTP.
 ## Baselines
 
 ::: settlrl_agents.baselines
-
-## Search
-
-::: settlrl_agents.search
 
 ## Planner
 

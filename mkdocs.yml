@@ -43,6 +43,7 @@ plugins:
           paths:
             - packages/settlrl-engine/src
             - packages/settlrl-game/src
+            - packages/settlrl-search/src
             - packages/settlrl-agents/src
             - packages/settlrl-app/src
             - packages/settlrl-learn/src
@@ -62,6 +63,7 @@ nav:
   - Reference:
       - settlrl-engine: reference/engine.md
       - settlrl-game: reference/game.md
+      - settlrl-search: reference/search.md
       - settlrl-agents: reference/agents.md
       - settlrl-app: reference/app.md
       - settlrl-learn: reference/learn.md

@@ -1,35 +1,40 @@
 # settlrl-learn
 
-Learned value and policy functions that plug into the agents.
+Learned value and policy functions that plug into the agents, and the
+training loop that produces them.
 
-## AlphaZero
+## Experiment harness
 
-::: settlrl_learn.alphazero
-
-## Self-play
-
-::: settlrl_learn.selfplay
-
-## Training
-
-::: settlrl_learn.train
-
-## Model
-
-::: settlrl_learn.model
-
-## Architectures
-
-::: settlrl_learn.architectures
+::: settlrl_learn.experiment
 
 ## Features
 
 ::: settlrl_learn.features
 
+## Toy trainer
+
+::: settlrl_learn.train
+
+## MLP
+
+::: settlrl_learn.nn.mlp
+
+## Architectures
+
+::: settlrl_learn.nn.architectures
+
 ## Graph
 
-::: settlrl_learn.graph
+::: settlrl_learn.nn.graph
 
 ## Graph net
 
-::: settlrl_learn.graphnet
+::: settlrl_learn.nn.graphnet
+
+## Board GNN
+
+::: settlrl_learn.nn.board_gnn
+
+## Training loop
+
+::: settlrl_learn.training
