@@ -22,6 +22,7 @@ import equinox as eqx
 from settlrl_learn.training.backend import Backend
 from settlrl_learn.training.config import LearnConfig
 from settlrl_learn.training.loop import run_selfplay, selfplay_callables
+from settlrl_learn.training.selfplay import SelfPlayCarry
 
 
 def bench_selfplay(
@@ -34,8 +35,21 @@ def bench_selfplay(
     seed: int = 0,
 ) -> dict[str, float]:
     """Time ``repeats`` self-play batches of ``cfg.selfplay.samples`` at a fixed
-    ``net``, after ``warmup`` untimed calls (at ``seed + 1000``; the timed ones
-    all run at ``seed``, so they share one workload).
+    ``net``, after ``warmup`` untimed calls (the timed ones all start at
+    ``seed``).
+
+    Under ``cfg.selfplay.persistent`` the warmup call(s) *create* the carry
+    (paying the XLA compile and ramping the pool up from a cold env) and every
+    timed repeat *threads* it, continuing the games in flight rather than
+    rebuilding a fresh env per call -- so ``discarded`` stays honest (trims
+    only, per :func:`~settlrl_learn.training.selfplay.self_play`'s contract)
+    instead of silently losing whatever was pending in a discarded env. Repeats
+    are then sequential continuations of one pool, not repetitions of an
+    identical workload -- their ``samples``/``env_steps``/``discarded`` can
+    differ (the surplus carried into each call varies), so the reported
+    ``samples``/``env_steps``/``discarded`` are the *last* repeat's, same as
+    the non-persistent path, and the timing headline stays the across-repeat
+    median (steady-state flush rate, not a single sample).
 
     Reports ``samples_per_s`` / ``moves_per_s`` / ``sims_per_s`` (medians over
     the repeats), the per-repeat wall times ``t_0..t_{repeats-1}`` with their
@@ -45,21 +59,12 @@ def bench_selfplay(
 
     Raises ``ValueError`` under playout-cap randomization
     (``cfg.selfplay.pcr_full_prob`` < 1): the sims-per-move accounting assumes
-    every step ran the full search. Raises ``ValueError`` under
-    ``cfg.selfplay.persistent``: the repeats do not thread a carry, so they
-    would keep the fresh-env workload while ``discarded`` reported a persistent
-    run's. Raises ``ValueError`` if ``repeats`` < 1 (the median over zero timed
-    repeats is undefined)."""
+    every step ran the full search. Raises ``ValueError`` if ``repeats`` < 1
+    (the median over zero timed repeats is undefined)."""
     if cfg.selfplay.pcr_full_prob < 1.0:
         raise ValueError(
             "bench_selfplay needs pcr_full_prob == 1.0 (playout-cap randomization "
             f"makes sims_per_s meaningless); got {cfg.selfplay.pcr_full_prob}"
-        )
-    if cfg.selfplay.persistent:
-        raise ValueError(
-            "bench_selfplay measures the fresh-env workload and does not thread a "
-            "carry across repeats; persistent benching lands with the loop "
-            "integration"
         )
     if repeats < 1:
         raise ValueError(f"bench_selfplay needs repeats >= 1; got {repeats}")
@@ -67,17 +72,28 @@ def bench_selfplay(
     net_search = calls.make_net_search(cfg.search.num_simulations)
     search = functools.partial(net_search, eqx.partition(net, eqx.is_array)[0])
 
-    def play(sd: int) -> tuple[int, int, int]:
-        samples, stats, _ = run_selfplay(calls, search, cfg, cfg.selfplay.samples, sd)
-        return samples["value"].shape[0], stats.env_steps, stats.discarded
+    def play(
+        sd: int, carry: SelfPlayCarry | None
+    ) -> tuple[int, int, int, SelfPlayCarry | None]:
+        samples, stats, new_carry = run_selfplay(
+            calls, search, cfg, cfg.selfplay.samples, sd, carry=carry
+        )
+        return samples["value"].shape[0], stats.env_steps, stats.discarded, new_carry
 
+    # Non-persistent: `run_selfplay` always hands back `None`, so `carry` stays
+    # `None` across every call below and each one rebuilds a fresh env at `sd`
+    # -- unchanged from the pre-persistent behaviour. Persistent: the warmup
+    # call(s) build the carry (at `seed + 1000`) and every later call threads
+    # it, so `sd` stops mattering once the pool exists (`self_play`'s contract:
+    # `seed` seeds only the first call of a persistent chain).
+    carry: SelfPlayCarry | None = None
     for _ in range(warmup):
-        play(seed + 1000)
+        *_, carry = play(seed + 1000, carry)
     times: list[float] = []
     n_samples = env_steps = discarded = 0
     for _ in range(repeats):
         t0 = time.perf_counter()
-        n_samples, env_steps, discarded = play(seed)
+        n_samples, env_steps, discarded, carry = play(seed, carry)
         times.append(time.perf_counter() - t0)
 
     t_median = statistics.median(times)

@@ -997,16 +997,30 @@ def test_bench_selfplay_reports_throughput() -> None:
     assert out["sims_per_s"] == out["moves_per_s"] * 2  # num_simulations
 
 
-def test_bench_selfplay_rejects_persistent() -> None:
-    # The bench's repeats do not thread a carry, so persistence would leave the
-    # workload fresh while `discarded` reported a persistent run's (~trims only).
+def test_bench_selfplay_persistent_threads_carry() -> None:
+    # Persistent bench: the warmup call creates the carry, timed repeats thread
+    # it -- so every repeat's `discarded` is honestly trims-only (the pending
+    # games survive in the carry instead of being silently dropped by a fresh
+    # env each call), unlike the guard this replaces (which fired precisely
+    # because an un-threaded persistent call would under-report `discarded`).
     backend = MLPBackend((16,))
     cfg = _bench_cfg()
     cfg = cfg.model_copy(
         update={"selfplay": cfg.selfplay.model_copy(update={"persistent": True})}
     )
-    with pytest.raises(ValueError, match="persistent"):
-        bench_selfplay(backend, backend.init(jax.random.key(0)), cfg)
+    out = bench_selfplay(
+        backend, backend.init(jax.random.key(0)), cfg, warmup=1, repeats=2, seed=0
+    )
+    assert set(out) == {
+        "samples_per_s", "moves_per_s", "sims_per_s", "samples",
+        "env_steps", "discarded", "t_median_s", "t_0", "t_1",
+    }  # fmt: skip
+    assert out["samples_per_s"] >= 0.0
+    # No `max_game_len` trim can fire at this budget (a handful of env steps
+    # against the 800-row default cap), so discarded is exactly 0 -- honest
+    # trims-only accounting because the pending games rode the threaded carry
+    # instead of vanishing with a discarded fresh env.
+    assert out["discarded"] == 0.0
 
 
 def test_bench_selfplay_rejects_playout_cap() -> None:

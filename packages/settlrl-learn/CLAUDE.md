@@ -238,15 +238,20 @@ deps only because this subpackage uses them.
     with `grad_clip=0` (its opt-state has no clip layer).
   - `training/bench.py::bench_selfplay(backend, net, cfg, *, warmup, repeats,
     seed)` — the self-play throughput probe (the loop's dominant cost, isolated:
-    no optimiser/replay/arena). `warmup` untimed calls at `seed + 1000` pay the
-    XLA compile, then every timed repeat runs the *same* workload at `seed`, so
-    the spread across `t_0..t_n` is measurement noise. Reports medians:
-    `samples_per_s`, `moves_per_s` (a move is one lane-step, `env_steps * batch`),
-    `sims_per_s` (`moves_per_s * search.num_simulations`). Rejects
-    `pcr_full_prob` < 1 — playout-cap randomization breaks the sims-per-move
-    accounting — and rejects `selfplay.persistent`: the repeats deliberately do
-    not thread a carry, so the workload would stay fresh-env while `discarded`
-    reported a persistent run's.
+    no optimiser/replay/arena). Under `selfplay.persistent` off (the default),
+    `warmup` untimed calls at `seed + 1000` pay the XLA compile, then every
+    timed repeat rebuilds a fresh env and runs the *same* workload at `seed`,
+    so the spread across `t_0..t_n` is measurement noise. Under `persistent`,
+    the warmup call(s) instead *create* the carry (compile + pool ramp-up) and
+    every timed repeat *threads* it — continuing the games in flight rather
+    than discarding them, so `discarded` stays honest (trims only) — meaning
+    repeats are sequential continuations of one pool, not repetitions of an
+    identical workload; the reported `samples`/`env_steps`/`discarded` are the
+    last repeat's, and the timing headline stays the across-repeat median
+    (steady-state flush rate). Reports medians: `samples_per_s`, `moves_per_s`
+    (a move is one lane-step, `env_steps * batch`), `sims_per_s`
+    (`moves_per_s * search.num_simulations`). Rejects `pcr_full_prob` < 1 —
+    playout-cap randomization breaks the sims-per-move accounting.
   - `tests/benchmark/` holds the pytest-benchmark suite (net forward, one
     vmapped search step, one self-play window, one optimiser step) on a
     random-init `BoardGNN` — `benchmark`-marked and deselected from the
