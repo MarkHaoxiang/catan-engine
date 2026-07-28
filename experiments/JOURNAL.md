@@ -57,3 +57,16 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   (741 moves/s, 47438 sims/s), 72.8% of searched positions discarded at the
   iteration boundary — the optimization track's before number (run
   runs/0004_alphazero/2026-07-28T065337Z, commit 2811210).
+- 0004 bench_throughput batch sweep (2026-07-28, measurement only, no config
+  adopted). B=256 re-run reproduces the frozen baseline (193.81 vs 193.07
+  samples/s, +0.4%, ruler holds). B=512 and B=1024 both *regress*, opposite
+  the design-phase synthetic-replica prediction of a 1.6x per-lane win:
+  193.81 (256) > 166.39 (512) > 120.15 (1024) samples/s, with discard
+  fraction climbing 72.7%→84.5%→91.0% — larger batch means more
+  lockstep-truncation waste, not less. No OOM at any size; peak GPU memory
+  is ~flat at 25.3-25.4GiB (78% of 32GB) across all three, which is JAX's
+  preallocated pool, not a per-batch signal. Winner: B=256, the current
+  default — batch-size increase does not pay off at this anchor (64 sims).
+  Runs: runs/0004_alphazero/2026-07-28T103722Z (256),
+  runs/0004_alphazero/2026-07-28T104353Z (512),
+  runs/0004_alphazero/2026-07-28T105136Z (1024).
