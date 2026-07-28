@@ -27,8 +27,11 @@ import equinox as eqx
 import flashbax as fbx
 import jax
 import jax.numpy as jnp
+import numpy as np
 from settlrl_agents.value import ValueFunction
 from settlrl_engine.belief import belief_view
+from settlrl_engine.board import make_board
+from settlrl_engine.env import N_FLAT
 from settlrl_search import (
     PolicyWeights,
     PolicyWeightsValue,
@@ -44,10 +47,14 @@ from settlrl_learn.training.backend import (
 )
 from settlrl_learn.training.config import LearnConfig
 from settlrl_learn.training.selfplay import (
+    PaddedCarry,
     Samples,
     SelfPlayCarry,
     SelfPlayStats,
+    empty_padded,
+    from_padded,
     self_play,
+    to_padded,
 )
 from settlrl_learn.training.steps import (
     evaluate,
@@ -150,6 +157,37 @@ def run_selfplay(
     )  # fmt: skip
 
 
+_SELFPLAY_N_PLAYERS = 2
+"""``run_selfplay`` never overrides :func:`self_play`'s seat count."""
+
+
+def carry_template(backend: Backend, cfg: LearnConfig) -> PaddedCarry:
+    """The zero :class:`~settlrl_learn.training.selfplay.PaddedCarry` a run of
+    ``cfg`` checkpoints: the eqx template that resume deserialises into, and what
+    stands in before (or without) a live pool.
+
+    A non-persistent run pads to zero rows -- one structure either way, but only
+    the flag that keeps games alive pays for the pad."""
+    layout, state = make_board(batch_size=1, seed=0, n_players=_SELFPLAY_N_PLAYERS)
+    one = jax.tree.map(lambda x: x[0], (layout, state))
+    obs = jax.eval_shape(backend.observe, one[0], one[1], jnp.int32(0))
+    spec: dict[str, tuple[tuple[int, ...], np.dtype[Any]]] = {
+        k: (v.shape, np.dtype(v.dtype)) for k, v in obs.items()
+    }
+    spec["policy"] = ((N_FLAT,), np.dtype(np.float32))
+    spec["mask"] = ((N_FLAT,), np.dtype(np.bool_))
+    spec["train_policy"] = ((), np.dtype(np.float32))
+    if cfg.value_blend.max > 0:
+        spec["q"] = ((), np.dtype(np.float32))
+    return empty_padded(
+        batch_size=cfg.selfplay.batch,
+        n_players=_SELFPLAY_N_PLAYERS,
+        track_ordering=cfg.search.ordered,
+        max_game_len=cfg.selfplay.max_game_len if cfg.selfplay.persistent else 0,
+        spec=spec,
+    )
+
+
 def learn(
     backend: Backend,
     cfg: LearnConfig,
@@ -178,13 +216,22 @@ def learn(
         sample_batch_size=cfg.optim.batch_size, add_batches=True,
     )  # fmt: skip
     net0 = backend.init(jax.random.key(cfg.seed))
+    zero_carry = carry_template(backend, cfg)
     fresh_state = RunState(
         net0, backend.init_opt(optimizer, net0),
-        buffer.init(backend.empty_item()), jnp.int32(0), jnp.float32(-1.0),
+        buffer.init(backend.empty_item()), jnp.int32(0), jnp.float32(-1.0), zero_carry,
     )  # fmt: skip
     state = load_run_state(resume_from, fresh_state) if resume_from else fresh_state
     net, opt_state, buf_state = state.net, state.opt_state, state.buffer_state
-    best = float(state.best)
+    best, start = float(state.best), int(state.iteration)
+    # The pool the checkpoint left in flight (a pre-carry or fresh state has
+    # none, so `persistent` then starts a new one seeded as usual).
+    carry: SelfPlayCarry | None = (
+        from_padded(state.selfplay_carry, track_ordering=cfg.search.ordered)
+        if cfg.selfplay.persistent and bool(state.selfplay_carry.present)
+        else None
+    )
+    del state, fresh_state  # the padded carry is large; keep only the live one
     ckpt = Path(checkpoint_dir) / "runstate.eqx" if checkpoint_dir else None
 
     step = backend.make_step(optimizer)
@@ -228,17 +275,16 @@ def learn(
         full_prob: float = 1.0,
     ) -> tuple[Samples, SelfPlayStats, SelfPlayCarry | None]:
         return run_selfplay(
-            calls, search, cfg, n, seed, fast_search=fast_search, full_prob=full_prob
-        )
+            calls, search, cfg, n, seed,
+            fast_search=fast_search, full_prob=full_prob, carry=carry,
+        )  # fmt: skip
 
-    iters: Iterable[int] = range(int(state.iteration), cfg.n_iterations)
+    iters: Iterable[int] = range(start, cfg.n_iterations)
     bar = None
     if progress:
         from tqdm.auto import tqdm
 
-        bar = tqdm(
-            iters, initial=int(state.iteration), total=cfg.n_iterations, unit="iter"
-        )
+        bar = tqdm(iters, initial=start, total=cfg.n_iterations, unit="iter")
         iters = bar
 
     for i in iters:
@@ -255,12 +301,7 @@ def learn(
             if pcr:
                 fast = functools.partial(net_search_fast, net_arrays)
                 full_prob = cfg.selfplay.pcr_full_prob
-        # The carry is dropped here: threading it across iterations (and into the
-        # checkpoint) is the next step -- `persistent` stays a self-play-level
-        # knob. Until then `persistent=True` still cuts games at the boundary
-        # while `selfplay_discarded` counts only trims, i.e. it UNDERSTATES the
-        # real waste.
-        fresh, sp_stats, _ = _play(
+        fresh, sp_stats, carry = _play(
             search, cfg.selfplay.samples, cfg.seed + 1 + i,
             fast_search=fast, full_prob=full_prob,
         )  # fmt: skip
@@ -272,53 +313,58 @@ def learn(
             "selfplay_discarded": float(sp_stats.discarded),
         }
         nf = fresh["value"].shape[0]
-        if nf == 0:  # degenerate net dragged every game past the budget; skip
-            if on_iter is not None:
-                on_iter(i, {"samples": 0.0, **sp}, net)
-            continue
-
-        # Periodic generalization check: score val_* on this iter's fresh batch
-        # under the *pre-train* net -- the net generated these positions but has
-        # not trained on them yet, so it is a valid held-out-in-time signal; the
-        # batch then trains as normal (no data wasted). Gated past the warm-up.
-        eval_d: dict[str, float] = {}
-        if (
-            cfg.eval.every
-            and (i + 1) % cfg.eval.every == 0
-            and (i + 1) >= cfg.teacher.iters
-        ):
-            te = time.perf_counter()
-            sl = {k: v[: cfg.eval.samples] for k, v in fresh.items()}
-            eval_d = evaluate(backend, net, sl)
-            eval_d["t_eval"] = time.perf_counter() - te
-
-        fr, alpha = prepare_targets(
-            fresh, blend=blend,
-            blend_max=cfg.value_blend.max, blend_ramp=cfg.value_blend.ramp,
-            iteration=i,
-        )  # fmt: skip
-        buf_state = buffer.add(buf_state, backend.to_item(fr))
-        steps = (
-            cfg.optim.train_steps
-            if cfg.optim.reuse <= 0
-            else max(
-                1, int(cfg.optim.reuse * fr["value"].shape[0] / cfg.optim.batch_size)
-            )
-        )
-        # entropy of the search policy *targets* (degenerate targets -> the net
-        # learns a degenerate policy).
-        tp = jnp.asarray(fr["policy"])
-        target_entropy = float(
-            -jnp.mean(jnp.sum(tp * jnp.log(jnp.clip(tp, 1e-9, 1.0)), axis=-1))
-        )
         metrics: dict[str, float] = {
-            "samples": float(nf), "train_steps": float(steps),
-            "lr": cfg.optim.lr, "target_entropy": target_entropy,
-            "value_blend_alpha": alpha, "t_selfplay": t_selfplay, **sp,
+            "samples": float(nf), "lr": cfg.optim.lr, "t_selfplay": t_selfplay, **sp,
         }  # fmt: skip
 
+        # A zero-sample iteration is normal under `persistent` (the carried
+        # surplus already covered the request, so the call took no env step) and
+        # means a degenerate net elsewhere. Either way it skips the *data* steps
+        # -- eval, replay add, and the optimiser (no fresh data, no update) --
+        # but still counts, checkpoints and proceeds.
+        eval_d: dict[str, float] = {}
+        steps = 0
+        if nf:
+            # Periodic generalization check: score val_* on this iter's fresh
+            # batch under the *pre-train* net -- the net generated these positions
+            # but has not trained on them yet, so it is a valid held-out-in-time
+            # signal; the batch then trains as normal (no data wasted). Gated past
+            # the warm-up.
+            if (
+                cfg.eval.every
+                and (i + 1) % cfg.eval.every == 0
+                and (i + 1) >= cfg.teacher.iters
+            ):
+                te = time.perf_counter()
+                sl = {k: v[: cfg.eval.samples] for k, v in fresh.items()}
+                eval_d = evaluate(backend, net, sl)
+                eval_d["t_eval"] = time.perf_counter() - te
+
+            fr, alpha = prepare_targets(
+                fresh, blend=blend,
+                blend_max=cfg.value_blend.max, blend_ramp=cfg.value_blend.ramp,
+                iteration=i,
+            )  # fmt: skip
+            buf_state = buffer.add(buf_state, backend.to_item(fr))
+            steps = (
+                cfg.optim.train_steps
+                if cfg.optim.reuse <= 0
+                else max(
+                    1,
+                    int(cfg.optim.reuse * fr["value"].shape[0] / cfg.optim.batch_size),
+                )
+            )
+            # entropy of the search policy *targets* (degenerate targets -> the
+            # net learns a degenerate policy).
+            tp = jnp.asarray(fr["policy"])
+            metrics["target_entropy"] = float(
+                -jnp.mean(jnp.sum(tp * jnp.log(jnp.clip(tp, 1e-9, 1.0)), axis=-1))
+            )
+            metrics["value_blend_alpha"] = alpha
+            metrics["train_steps"] = float(steps)
+
         t1 = time.perf_counter()
-        if bool(buffer.can_sample(buf_state)):
+        if steps and bool(buffer.can_sample(buf_state)):
             net, opt_state, tm = train_epochs(
                 net, opt_state, buffer, buf_state, step, steps,
                 jax.random.key(cfg.seed + 10_000 + i),
@@ -349,10 +395,15 @@ def learn(
                 best = max(best, am["arena_winrate"])
 
         if ckpt is not None and (i + 1) % cfg.checkpoint_every == 0:
+            pool = (
+                zero_carry
+                if carry is None
+                else to_padded(carry, cfg.selfplay.max_game_len)
+            )
             save_run_state(
                 ckpt,
                 RunState(
-                    net, opt_state, buf_state, jnp.int32(i + 1), jnp.float32(best)
+                    net, opt_state, buf_state, jnp.int32(i + 1), jnp.float32(best), pool
                 ),
             )
         if bar is not None:

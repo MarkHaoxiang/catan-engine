@@ -91,10 +91,23 @@ deps only because this subpackage uses them.
   - `training/backend.py` — the `Backend` protocol (the net-specific surface:
     `init` / `seams` / `play_agent` / `setup_policy` / `observe` / `to_item` /
     `empty_item` / `init_opt` / `make_step` / `eval_metrics`) and `RunState`
-    (net + optimiser moments + replay buffer + iteration + best). `RunState` is
-    **eqx-serialised** (`save_run_state`) — eqx's leaf serialiser fits both an
-    equinox module and a plain-JAX pytree, so it replaced orbax for *both*
-    backends.
+    (net + optimiser moments + replay buffer + iteration + best + the self-play
+    carry). `RunState` is **eqx-serialised** (`save_run_state`) — eqx's leaf
+    serialiser fits both an equinox module and a plain-JAX pytree, so it
+    replaced orbax for *both* backends.
+    `selfplay_carry` is the padded self-play pool (below) and is deliberately the
+    **last** field, so a checkpoint written before it existed is exactly the file
+    minus its trailing section: `load_run_state` reads the older fields, and if
+    the file ends there keeps the template's (empty) carry. Every other mismatch
+    — a resume into a run with a different batch size, seat count or
+    `value_blend` — falls out of eqx's per-leaf shape/dtype checks, and the one
+    semantic the shapes cannot see (`search.ordered`) is checked by `from_padded`.
+    Checkpoint size: the pad is fixed-shape, so a *persistent* run pays it in
+    full at every write — **1.82 GiB** at B=256 / `max_game_len` 800 / GNN obs +
+    662-wide policy, ~0.5 s to build and ~0.5 s to write (measured 2026-07-28,
+    independent of how full the pool actually is). A non-persistent run pads to
+    zero rows and pays 266 KiB (the env arrays). If that write cost ever bites,
+    the lever is a separate pad bound below `max_game_len`, not the fixed shape.
   - `training/selfplay.py::self_play` — batched n-player self-play, the search
     (net's or a fixed teacher's) guiding the re-determinizing moves and improved
     policy. The backend's `observe` records the *true* board (net learns the
@@ -134,13 +147,28 @@ deps only because this subpackage uses them.
     Flag off, everything is bit-identical to before (a frozen digest golden
     captured pre-change guards the RNG stream and recording order). The cost:
     a persistent call's output is pure in (`seed`, carried state) rather than in
-    `seed` alone — `seed` seeds only the first call — which is why the carry has
-    to reach the checkpoint for bit-exact resume to survive.
+    `seed` alone — `seed` seeds only the first call — which is why the carry
+    reaches the checkpoint (`to_padded` / `from_padded`, beside the carry).
+    The padded form is fixed-shape because that is what an eqx deserialisation
+    template is: every recorded key pads to `(batch, max_game_len, …)` in host
+    numpy with a per-lane `pending_len`, and the env — a held *object*, not a
+    pytree — contributes `PaddedEnv`, its complete array state with PRNG keys as
+    raw uint32 (eqx cannot serialise typed key arrays). `from_padded` rebuilds an
+    equivalent env by re-constructing one and overwriting that state; the ctor's
+    `seed` is not live state (only `reset` reads it). A test asserts `PaddedEnv`
+    still names every array attribute the env holds, so an engine-side addition
+    breaks loudly instead of silently not being carried.
   - `training/loop.py::learn(backend, cfg: LearnConfig, *, teacher_value=…,
     checkpoint_dir=…, resume_from=…, …)` — the orchestrator over the `steps`
     units. Per-iteration RNG is a pure function of `cfg.seed` and the iteration
     index, so `resume_from` (a `runstate.eqx`) continues bit-identically (tested
-    in `tests/` resume checks for both backends). `cfg.optim.reuse` caps
+    in `tests/` resume checks for both backends, and with `selfplay.persistent`
+    on — where the pool in flight, not just the seed, decides what comes next).
+    Under `persistent` the loop holds the carry across iterations and folds it
+    into every checkpoint; a *zero-sample* iteration is then ordinary rather than
+    degenerate (the carried surplus already covered the request, so the call took
+    no env step), so it skips only the data steps — eval, replay add, optimiser —
+    and still counts, checkpoints and proceeds. `cfg.optim.reuse` caps
     updates/iter at the AZ sample-reuse factor (the value-overfit fix); every
     `cfg.eval.every` iters the first `cfg.eval.samples` of that iter's fresh batch
     are scored (`eval_metrics` -> the `val_*` metrics) under the *pre-train* net,

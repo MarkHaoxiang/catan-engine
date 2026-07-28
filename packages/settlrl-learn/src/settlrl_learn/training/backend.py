@@ -94,13 +94,22 @@ class Backend(Protocol):
 
 
 class RunState(NamedTuple):
-    """One run's complete mutable state, eqx-serialised for bit-exact resume."""
+    """One run's complete mutable state, eqx-serialised for bit-exact resume.
+
+    ``selfplay_carry`` is last so it forms the file's trailing section, which is
+    what lets :func:`load_run_state` read a checkpoint written before the field
+    existed.
+    """
 
     net: Any  # AZParams | BoardGNN
     opt_state: optax.OptState
     buffer_state: Any  # flashbax buffer state pytree
     iteration: Int[Array, ""]  # iterations completed
     best: Float[Array, ""]  # best arena win rate so far
+    selfplay_carry: Any  # settlrl_learn.training.selfplay.PaddedCarry
+
+
+_PRE_CARRY_FIELDS = RunState._fields.index("selfplay_carry")
 
 
 def save_run_state(path: str | Path, state: RunState) -> None:
@@ -108,4 +117,19 @@ def save_run_state(path: str | Path, state: RunState) -> None:
 
 
 def load_run_state(path: str | Path, template: RunState) -> RunState:
-    return cast(RunState, eqx.tree_deserialise_leaves(Path(path), template))
+    """``path``'s run state, shaped by ``template``.
+
+    A pre-``selfplay_carry`` checkpoint (the file ends where that section would
+    start) loads with the template's carry. Every other mismatch -- a resume into
+    a differently-configured run -- raises out of eqx's leaf checks.
+    """
+    with Path(path).open("rb") as f:
+        net, opt_state, buffer_state, iteration, best = cast(
+            "tuple[Any, ...]",
+            eqx.tree_deserialise_leaves(f, template[:_PRE_CARRY_FIELDS]),
+        )
+        carry = template.selfplay_carry
+        if f.read(1) != b"":
+            f.seek(-1, 1)
+            carry = eqx.tree_deserialise_leaves(f, carry)
+    return RunState(net, opt_state, buffer_state, iteration, best, carry)
