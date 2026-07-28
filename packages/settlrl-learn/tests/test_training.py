@@ -249,6 +249,38 @@ def test_persistent_carry_two_calls_equal_one_long_call() -> None:
         assert np.array_equal(joined, long[k]), f"{k} diverged from the long call"
 
 
+def test_persistent_zero_step_call_keeps_the_stream_intact() -> None:
+    # A call whose request the carried surplus already covers must take no step
+    # at all (realistic at scale: one step can flush several whole buffers) --
+    # and still return the full key set with the real dtypes, so it concatenates
+    # into the stream as a no-op. `mask` is bool, so a float32 empty would be
+    # silently promoted by np.concatenate; the carried spec keeps dtypes exact.
+    backend = MLPBackend((16,))
+    j = _jitted(_uniform_legal_dist, backend)
+    first, s1, carry = self_play(
+        n_samples=250, batch_size=2, seed=1, temperature=1.0, persistent=True, **j
+    )
+    assert carry is not None and s1.recorded > 100  # surplus > the next request
+    mid, s_mid, carry = self_play(
+        n_samples=100, batch_size=2, seed=1, temperature=1.0, persistent=True,
+        carry=carry, **j,
+    )  # fmt: skip
+    assert (s_mid.recorded, s_mid.env_steps) == (0, 0)
+    assert set(mid) == set(first)
+    assert {k: mid[k].dtype for k in mid} == {k: first[k].dtype for k in first}
+    assert carry is not None
+    last, _, _ = self_play(
+        n_samples=150, batch_size=2, seed=1, temperature=1.0, persistent=True,
+        carry=carry, **j,
+    )  # fmt: skip
+    long, _, _ = self_play(
+        n_samples=500, batch_size=2, seed=1, temperature=1.0, **j
+    )  # fmt: skip
+    for k in long:
+        joined = np.concatenate([first[k], mid[k], last[k]])
+        assert joined.dtype == long[k].dtype and np.array_equal(joined, long[k]), k
+
+
 def test_persistent_discard_counts_only_trims() -> None:
     # Flag off, the unfinished games are thrown away at the call boundary (the
     # iteration waste). Flag on, they stay in the carry, so `discarded` counts
@@ -675,6 +707,18 @@ def test_bench_selfplay_reports_throughput() -> None:
     }  # fmt: skip
     assert out["samples_per_s"] > 0.0 and out["samples"] > 0.0
     assert out["sims_per_s"] == out["moves_per_s"] * 2  # num_simulations
+
+
+def test_bench_selfplay_rejects_persistent() -> None:
+    # The bench's repeats do not thread a carry, so persistence would leave the
+    # workload fresh while `discarded` reported a persistent run's (~trims only).
+    backend = MLPBackend((16,))
+    cfg = _bench_cfg()
+    cfg = cfg.model_copy(
+        update={"selfplay": cfg.selfplay.model_copy(update={"persistent": True})}
+    )
+    with pytest.raises(ValueError, match="persistent"):
+        bench_selfplay(backend, backend.init(jax.random.key(0)), cfg)
 
 
 def test_bench_selfplay_rejects_playout_cap() -> None:

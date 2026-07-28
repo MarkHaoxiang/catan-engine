@@ -25,7 +25,7 @@ A training-side module: not imported by the package root.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -71,15 +71,16 @@ class SelfPlayCarry(NamedTuple):
 
     ``surplus`` is how many samples past the cumulative request the pool has
     already handed out (negative when a call ended short of it), so a resumed
-    call stops where one long call would have. ``trailing`` is the per-key
-    sample shape, carried so a call that returns no samples still knows them.
+    call stops where one long call would have. ``spec`` is the per-key trailing
+    shape and dtype, carried so a call that records nothing still returns the
+    same keys with the same dtypes.
     """
 
     env: BatchedSettlrlEnv
     pending: list[list[PendingRow]]
     key: Array
     surplus: int
-    trailing: dict[str, tuple[int, ...]]
+    spec: dict[str, tuple[tuple[int, ...], np.dtype[Any]]]
 
 
 def _sample_moves(key: Array, weights: Array, mask: Array, temperature: float) -> Array:
@@ -141,7 +142,8 @@ def self_play(
     the games still in flight; passing it back as ``carry`` resumes them, so a
     sequence of persistent calls of ``n_samples`` each yields exactly what one
     call of their total would (same env stepping, same RNG stream, same flush
-    order -- the surplus of a call that overshot is credited to the next).
+    order -- the surplus of a call that overshot is credited to the next), as
+    long as no call exhausts its own ``max_steps`` (a per-call budget).
     ``seed`` then seeds only the *first* call: the RNG lives in the carry, so a
     persistent call's output is a function of (``seed``, carried state) rather
     than of ``seed`` alone."""
@@ -156,13 +158,14 @@ def self_play(
             n_players=n_players, track_beliefs=True, track_ordering=track_ordering,
         )  # fmt: skip
         pending: list[list[PendingRow]] = [[] for _ in range(batch_size)]
-        trailing: dict[str, tuple[int, ...]] = {}
+        spec: dict[str, tuple[tuple[int, ...], np.dtype[Any]]] = {}
         key = jax.random.key(seed)
         surplus = 0
     else:
+        assert len(carry.pending) == batch_size, "carry was built at another batch size"
         env, pending, key, surplus = carry.env, carry.pending, carry.key, carry.surplus
-        trailing = carry.trailing
-        out = {k: [] for k in trailing}
+        spec = carry.spec
+        out = {k: [] for k in spec}
 
     for _step in range(max_steps):
         if surplus + len(vals) >= n_samples:
@@ -208,13 +211,15 @@ def self_play(
 
         obs = {k: np.asarray(v) for k, v in observe_of(layout, state, sel).items()}
         w_np, sel_np, m_np = np.asarray(weights), np.asarray(sel), np.asarray(mask)
-        if not trailing:  # capture per-key trailing shapes once, for the empty case
-            trailing = {k: v.shape[1:] for k, v in obs.items()}
-            trailing["policy"], trailing["mask"] = w_np.shape[1:], m_np.shape[1:]
-            trailing["train_policy"] = ()
+        if not spec:  # capture the per-key trailing shape+dtype once (empty case)
+            f32 = np.dtype(np.float32)
+            spec = {k: (v.shape[1:], v.dtype) for k, v in obs.items()}
+            spec["policy"] = (w_np.shape[1:], w_np.dtype)
+            spec["mask"] = (m_np.shape[1:], m_np.dtype)
+            spec["train_policy"] = ((), f32)
             if record_value:
-                trailing["q"] = ()
-            out = {k: [] for k in (*trailing,)}
+                spec["q"] = ((), f32)
+            out = {k: [] for k in (*spec,)}
         tp_val = 1.0 if full else 0.0  # 1 = full-search position (trains policy)
         for lane in range(batch_size):
             if is_setup[lane]:  # the net does not train on setup positions
@@ -254,12 +259,12 @@ def self_play(
         discarded=trimmed if persistent else trimmed + sum(len(p) for p in pending),
     )
     new_carry = (
-        SelfPlayCarry(env, pending, key, surplus + len(vals) - n_samples, trailing)
+        SelfPlayCarry(env, pending, key, surplus + len(vals) - n_samples, spec)
         if persistent
         else None
     )
-    if not vals:  # no game finished within the budget (a degenerate cold net)
-        empty: Samples = {k: np.zeros((0, *trailing[k]), np.float32) for k in trailing}
+    if not vals:  # no game finished within the budget, or a zero-step resume
+        empty: Samples = {k: np.zeros((0, *s), dt) for k, (s, dt) in spec.items()}
         empty["value"] = np.zeros((0,), np.float32)
         return empty, stats, new_carry
     samples: Samples = {k: np.stack(out[k]) for k in out}

@@ -45,12 +45,21 @@ def bench_selfplay(
 
     Raises ``ValueError`` under playout-cap randomization
     (``cfg.selfplay.pcr_full_prob`` < 1): the sims-per-move accounting assumes
-    every step ran the full search. Raises ``ValueError`` if ``repeats`` < 1
-    (the median over zero timed repeats is undefined)."""
+    every step ran the full search. Raises ``ValueError`` under
+    ``cfg.selfplay.persistent``: the repeats do not thread a carry, so they
+    would keep the fresh-env workload while ``discarded`` reported a persistent
+    run's. Raises ``ValueError`` if ``repeats`` < 1 (the median over zero timed
+    repeats is undefined)."""
     if cfg.selfplay.pcr_full_prob < 1.0:
         raise ValueError(
             "bench_selfplay needs pcr_full_prob == 1.0 (playout-cap randomization "
             f"makes sims_per_s meaningless); got {cfg.selfplay.pcr_full_prob}"
+        )
+    if cfg.selfplay.persistent:
+        raise ValueError(
+            "bench_selfplay measures the fresh-env workload and does not thread a "
+            "carry across repeats; persistent benching lands with the loop "
+            "integration"
         )
     if repeats < 1:
         raise ValueError(f"bench_selfplay needs repeats >= 1; got {repeats}")

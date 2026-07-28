@@ -120,12 +120,17 @@ deps only because this subpackage uses them.
     call returns a live `SelfPlayCarry` — the env object itself (a stateful
     wrapper over batched arrays with auto-reset, so it can simply be held and
     re-stepped), the per-lane pending buffers, the RNG key, the per-key sample
-    shapes, and a `surplus` counter — and passing it back resumes the games in
-    flight. `surplus` is the samples handed out past the cumulative request (a
-    finished game flushes whole, so a call overshoots); crediting it to the next
-    call is what makes a sequence of persistent calls of `n` produce *exactly*
-    what one call of their total would, positions and RNG stream included
-    (asserted in `tests/test_training.py`). `discarded` then counts only trims.
+    shape+dtype `spec`, and a `surplus` counter — and passing it back resumes
+    the games in flight. `surplus` is the samples handed out past the cumulative
+    request (a finished game flushes whole, so a call overshoots); crediting it
+    to the next call is what makes a sequence of persistent calls of `n` produce
+    *exactly* what one call of their total would, positions and RNG stream
+    included (asserted in `tests/test_training.py`) — provided no call exhausts
+    its own `max_steps`, which is a per-call budget. A resumed call whose request
+    the surplus already covers takes **zero** env steps and returns empty arrays
+    built from `spec` — hence the carried dtypes, since `mask` is bool and a
+    float32 empty would silently promote a concatenated stream.
+    `discarded` then counts only trims.
     Flag off, everything is bit-identical to before (a frozen digest golden
     captured pre-change guards the RNG stream and recording order). The cost:
     a persistent call's output is pure in (`seed`, carried state) rather than in
@@ -193,7 +198,9 @@ deps only because this subpackage uses them.
     `samples_per_s`, `moves_per_s` (a move is one lane-step, `env_steps * batch`),
     `sims_per_s` (`moves_per_s * search.num_simulations`). Rejects
     `pcr_full_prob` < 1 — playout-cap randomization breaks the sims-per-move
-    accounting.
+    accounting — and rejects `selfplay.persistent`: the repeats deliberately do
+    not thread a carry, so the workload would stay fresh-env while `discarded`
+    reported a persistent run's.
   - `tests/benchmark/` holds the pytest-benchmark suite (net forward, one
     vmapped search step, one self-play window, one optimiser step) on a
     random-init `BoardGNN` — `benchmark`-marked and deselected from the

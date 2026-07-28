@@ -256,7 +256,10 @@ def learn(
                 fast = functools.partial(net_search_fast, net_arrays)
                 full_prob = cfg.selfplay.pcr_full_prob
         # The carry is dropped here: threading it across iterations (and into the
-        # checkpoint) is the next step -- `persistent` stays a self-play-level knob.
+        # checkpoint) is the next step -- `persistent` stays a self-play-level
+        # knob. Until then `persistent=True` still cuts games at the boundary
+        # while `selfplay_discarded` counts only trims, i.e. it UNDERSTATES the
+        # real waste.
         fresh, sp_stats, _ = _play(
             search, cfg.selfplay.samples, cfg.seed + 1 + i,
             fast_search=fast, full_prob=full_prob,
