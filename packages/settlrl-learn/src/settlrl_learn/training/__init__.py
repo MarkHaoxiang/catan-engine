@@ -39,7 +39,7 @@ from settlrl_learn.training.loop import (
     selfplay_callables,
 )
 from settlrl_learn.training.mlp_backend import MLPBackend, mlp_loss
-from settlrl_learn.training.selfplay import SelfPlayStats, self_play
+from settlrl_learn.training.selfplay import SelfPlayCarry, SelfPlayStats, self_play
 from settlrl_learn.training.steps import (
     evaluate,
     make_optimizer,
@@ -61,6 +61,7 @@ __all__ = [
     "RunState",
     "SearchSettings",
     "SelfPlayCallables",
+    "SelfPlayCarry",
     "SelfPlayConfig",
     "SelfPlayStats",
     "TeacherConfig",

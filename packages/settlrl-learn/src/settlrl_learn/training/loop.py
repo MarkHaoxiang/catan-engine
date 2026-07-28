@@ -43,7 +43,12 @@ from settlrl_learn.training.backend import (
     save_run_state,
 )
 from settlrl_learn.training.config import LearnConfig
-from settlrl_learn.training.selfplay import Samples, SelfPlayStats, self_play
+from settlrl_learn.training.selfplay import (
+    Samples,
+    SelfPlayCarry,
+    SelfPlayStats,
+    self_play,
+)
 from settlrl_learn.training.steps import (
     evaluate,
     make_optimizer,
@@ -124,11 +129,15 @@ def run_selfplay(
     *,
     fast_search: Any = None,
     full_prob: float = 1.0,
-) -> tuple[Samples, SelfPlayStats]:
+    carry: SelfPlayCarry | None = None,
+) -> tuple[Samples, SelfPlayStats, SelfPlayCarry | None]:
     """:func:`~settlrl_learn.training.selfplay.self_play` over ``calls`` and
     ``cfg``'s selfplay/search knobs -- shared by :func:`learn`,
     :func:`~settlrl_learn.training.bench.bench_selfplay`, and the
-    ``test_selfplay_window`` benchmark so the kwarg wiring cannot drift."""
+    ``test_selfplay_window`` benchmark so the kwarg wiring cannot drift.
+
+    Under ``cfg.selfplay.persistent`` the returned carry resumes the games in
+    flight on the next call (and ``seed`` then only seeds the first one)."""
     return self_play(
         search, fast_search=fast_search, full_prob=full_prob, n_samples=n,
         observe_of=calls.observe_of, view_of=calls.view_of,
@@ -137,6 +146,7 @@ def run_selfplay(
         seed=seed, record_value=cfg.value_blend.max > 0,
         track_ordering=cfg.search.ordered,
         max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
+        persistent=cfg.selfplay.persistent, carry=carry,
     )  # fmt: skip
 
 
@@ -216,7 +226,7 @@ def learn(
         *,
         fast_search: Any = None,
         full_prob: float = 1.0,
-    ) -> tuple[Samples, SelfPlayStats]:
+    ) -> tuple[Samples, SelfPlayStats, SelfPlayCarry | None]:
         return run_selfplay(
             calls, search, cfg, n, seed, fast_search=fast_search, full_prob=full_prob
         )
@@ -245,7 +255,9 @@ def learn(
             if pcr:
                 fast = functools.partial(net_search_fast, net_arrays)
                 full_prob = cfg.selfplay.pcr_full_prob
-        fresh, sp_stats = _play(
+        # The carry is dropped here: threading it across iterations (and into the
+        # checkpoint) is the next step -- `persistent` stays a self-play-level knob.
+        fresh, sp_stats, _ = _play(
             search, cfg.selfplay.samples, cfg.seed + 1 + i,
             fast_search=fast, full_prob=full_prob,
         )  # fmt: skip

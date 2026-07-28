@@ -51,12 +51,35 @@ class SelfPlayStats(NamedTuple):
     lanes); ``recorded`` is the returned sample count; ``discarded`` is the
     positions generated but never returned -- the pending positions of games
     still unfinished when the call exited (the iteration-boundary waste), plus
-    any trimmed by ``max_game_len``.
+    any trimmed by ``max_game_len``. Under ``persistent`` the unfinished games
+    survive in the carry, so ``discarded`` counts only the trims.
     """
 
     env_steps: int
     recorded: int
     discarded: int
+
+
+PendingRow = tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, int, float, float]
+"""One recorded, not-yet-credited position: (observation, policy target, legality
+mask, acting seat, root value, ``train_policy`` flag)."""
+
+
+class SelfPlayCarry(NamedTuple):
+    """A live self-play pool between :func:`self_play` calls: the games in
+    flight, their uncredited positions, and the RNG stream to continue.
+
+    ``surplus`` is how many samples past the cumulative request the pool has
+    already handed out (negative when a call ended short of it), so a resumed
+    call stops where one long call would have. ``trailing`` is the per-key
+    sample shape, carried so a call that returns no samples still knows them.
+    """
+
+    env: BatchedSettlrlEnv
+    pending: list[list[PendingRow]]
+    key: Array
+    surplus: int
+    trailing: dict[str, tuple[int, ...]]
 
 
 def _sample_moves(key: Array, weights: Array, mask: Array, temperature: float) -> Array:
@@ -85,7 +108,9 @@ def self_play(
     max_game_len: int = 800,
     record_value: bool = False,
     track_ordering: bool = False,
-) -> tuple[Samples, SelfPlayStats]:
+    persistent: bool = False,
+    carry: SelfPlayCarry | None = None,
+) -> tuple[Samples, SelfPlayStats, SelfPlayCarry | None]:
     """Collect >= ``n_samples`` self-play positions, the moves and policy targets
     drawn from ``search``. Positions from finished games are credited with the
     acting seat's win (1) / loss (0); unfinished games are discarded (counted in
@@ -110,24 +135,37 @@ def self_play(
     ``max_steps`` caps the env-step budget and ``max_game_len`` each lane's
     retained pending positions -- a cold/degenerate net can drag a game out
     indefinitely, so without these the pending buffer grows unbounded. A capped
-    lane keeps its most recent positions."""
-    env = BatchedSettlrlEnv(
-        batch_size=batch_size, seed=seed, reward="sparse",
-        n_players=n_players, track_beliefs=True, track_ordering=track_ordering,
-    )  # fmt: skip
+    lane keeps its most recent positions.
+
+    ``persistent`` returns the live :class:`SelfPlayCarry` instead of dropping
+    the games still in flight; passing it back as ``carry`` resumes them, so a
+    sequence of persistent calls of ``n_samples`` each yields exactly what one
+    call of their total would (same env stepping, same RNG stream, same flush
+    order -- the surplus of a call that overshot is credited to the next).
+    ``seed`` then seeds only the *first* call: the RNG lives in the carry, so a
+    persistent call's output is a function of (``seed``, carried state) rather
+    than of ``seed`` alone."""
     pcr = fast_search is not None and full_prob < 1.0
-    pending: list[
-        list[tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, int, float, float]]
-    ] = [[] for _ in range(batch_size)]
     out: dict[str, list[np.ndarray]] = {}
-    trailing: dict[str, tuple[int, ...]] = {}
     vals: list[float] = []
-    key = jax.random.key(seed)
     env_steps = 0
     trimmed = 0
+    if carry is None:
+        env = BatchedSettlrlEnv(
+            batch_size=batch_size, seed=seed, reward="sparse",
+            n_players=n_players, track_beliefs=True, track_ordering=track_ordering,
+        )  # fmt: skip
+        pending: list[list[PendingRow]] = [[] for _ in range(batch_size)]
+        trailing: dict[str, tuple[int, ...]] = {}
+        key = jax.random.key(seed)
+        surplus = 0
+    else:
+        env, pending, key, surplus = carry.env, carry.pending, carry.key, carry.surplus
+        trailing = carry.trailing
+        out = {k: [] for k in trailing}
 
     for _step in range(max_steps):
-        if len(vals) >= n_samples:
+        if surplus + len(vals) >= n_samples:
             break
         layout, state = env.board
         beliefs = env.beliefs
@@ -212,12 +250,18 @@ def self_play(
     stats = SelfPlayStats(
         env_steps=env_steps,
         recorded=len(vals),
-        discarded=trimmed + sum(len(p) for p in pending),
+        # In-flight games survive in the carry, so only trims are lost there.
+        discarded=trimmed if persistent else trimmed + sum(len(p) for p in pending),
+    )
+    new_carry = (
+        SelfPlayCarry(env, pending, key, surplus + len(vals) - n_samples, trailing)
+        if persistent
+        else None
     )
     if not vals:  # no game finished within the budget (a degenerate cold net)
         empty: Samples = {k: np.zeros((0, *trailing[k]), np.float32) for k in trailing}
         empty["value"] = np.zeros((0,), np.float32)
-        return empty, stats
+        return empty, stats, new_carry
     samples: Samples = {k: np.stack(out[k]) for k in out}
     samples["value"] = np.asarray(vals, np.float32)
-    return samples, stats
+    return samples, stats, new_carry

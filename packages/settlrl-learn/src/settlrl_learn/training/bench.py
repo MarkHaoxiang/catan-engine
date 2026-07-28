@@ -59,7 +59,7 @@ def bench_selfplay(
     search = functools.partial(net_search, eqx.partition(net, eqx.is_array)[0])
 
     def play(sd: int) -> tuple[int, int, int]:
-        samples, stats = run_selfplay(calls, search, cfg, cfg.selfplay.samples, sd)
+        samples, stats, _ = run_selfplay(calls, search, cfg, cfg.selfplay.samples, sd)
         return samples["value"].shape[0], stats.env_steps, stats.discarded
 
     for _ in range(warmup):

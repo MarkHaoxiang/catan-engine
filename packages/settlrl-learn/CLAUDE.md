@@ -107,12 +107,30 @@ deps only because this subpackage uses them.
     fast (cheap `fast_search`); every position records its outcome value, but the
     `train_policy` flag is 1 only on full-search positions, so the policy loss
     trains on deep targets only (value on all). `full_prob` = 1 disables it.
-    Returns `(Samples, SelfPlayStats)`: `env_steps` (batched env steps, each
-    advancing all lanes), `recorded`, and `discarded` — positions generated but
-    never returned, i.e. the pending buffers of games still unfinished when the
-    call hit its sample target, plus `max_game_len` trims. The loop logs the
-    latter as `selfplay_discarded`: the *iteration-boundary waste* (games are cut
-    mid-flight every iteration, and only finished games yield samples).
+    Returns `(Samples, SelfPlayStats, SelfPlayCarry | None)`: `env_steps`
+    (batched env steps, each advancing all lanes), `recorded`, and `discarded` —
+    positions generated but never returned, i.e. the pending buffers of games
+    still unfinished when the call hit its sample target, plus `max_game_len`
+    trims. The loop logs the latter as `selfplay_discarded`: the
+    *iteration-boundary waste* (games are cut mid-flight every iteration, and
+    only finished games yield samples) — measured at 72.8% of searched positions
+    at B=256 and 91% at B=1024, which is what gates the batch lever (exp 0004,
+    2026-07-28).
+    **The persistent carry** (`selfplay.persistent`, opt-in) is the fix: the
+    call returns a live `SelfPlayCarry` — the env object itself (a stateful
+    wrapper over batched arrays with auto-reset, so it can simply be held and
+    re-stepped), the per-lane pending buffers, the RNG key, the per-key sample
+    shapes, and a `surplus` counter — and passing it back resumes the games in
+    flight. `surplus` is the samples handed out past the cumulative request (a
+    finished game flushes whole, so a call overshoots); crediting it to the next
+    call is what makes a sequence of persistent calls of `n` produce *exactly*
+    what one call of their total would, positions and RNG stream included
+    (asserted in `tests/test_training.py`). `discarded` then counts only trims.
+    Flag off, everything is bit-identical to before (a frozen digest golden
+    captured pre-change guards the RNG stream and recording order). The cost:
+    a persistent call's output is pure in (`seed`, carried state) rather than in
+    `seed` alone — `seed` seeds only the first call — which is why the carry has
+    to reach the checkpoint for bit-exact resume to survive.
   - `training/loop.py::learn(backend, cfg: LearnConfig, *, teacher_value=…,
     checkpoint_dir=…, resume_from=…, …)` — the orchestrator over the `steps`
     units. Per-iteration RNG is a pure function of `cfg.seed` and the iteration

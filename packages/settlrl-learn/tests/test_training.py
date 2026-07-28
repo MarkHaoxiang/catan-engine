@@ -7,6 +7,7 @@ Expect tests: the inline snapshot is the contract; regenerate with
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -127,7 +128,7 @@ def test_self_play_samples_shape_under_uniform_policy() -> None:
     # Drives the real generic self-play (env stepping, pending flush, outcome
     # credit) with the MLP observation but a trivial policy -- fast, no search.
     backend = MLPBackend((16,))
-    samples, _ = self_play(
+    samples, _, _ = self_play(
         n_samples=8, batch_size=4, seed=0,
         **_jitted(_uniform_weights, backend),
     )  # fmt: skip
@@ -150,7 +151,7 @@ def test_self_play_reports_stats() -> None:
     # positions of games still unfinished when the budget ran out -- the
     # iteration-boundary waste).
     backend = MLPBackend((16,))
-    samples, stats = self_play(
+    samples, stats, _ = self_play(
         n_samples=4, batch_size=2, seed=0,
         **_jitted(_uniform_weights, backend),
     )  # fmt: skip
@@ -168,12 +169,103 @@ def _uniform_weights_value(
 
 def test_self_play_records_root_value_when_asked() -> None:
     backend = MLPBackend((16,))
-    samples, _ = self_play(
+    samples, _, _ = self_play(
         n_samples=8, batch_size=4, seed=0, record_value=True,
         **_jitted(_uniform_weights_value, backend),
     )  # fmt: skip
     assert "q" in samples and samples["q"].shape == samples["value"].shape
     assert bool(np.all(np.abs(samples["q"] - 0.3) < 1e-5))  # the stand-in's q
+
+
+# --------------------------------------------------------------------------- #
+# Persistent self-play carry                                                   #
+# --------------------------------------------------------------------------- #
+
+# Captured from the pre-carry `self_play` (commit b6fb56b) at exactly the config
+# below. The flag-off path must reproduce it bit-for-bit -- the RNG stream and
+# the recording order are the contract, so these are frozen constants, NOT an
+# expecttest snapshot to regenerate.
+_GOLDEN_STATS = (833, 800, 866)  # env_steps, recorded, discarded
+_GOLDEN_ARRAYS = {
+    "features": ((800, 118), "float32", "7a7735a8c2af2582"),
+    "mask": ((800, 662), "bool", "20ab5e3d5a6eaca6"),
+    "policy": ((800, 662), "float32", "c5ecb941a3ea2504"),
+    "q": ((800,), "float32", "ce857a5e9ccde945"),
+    "train_policy": ((800,), "float32", "59e707682300eb4d"),
+    "value": ((800,), "float32", "408ff942db14360c"),
+}
+
+
+def _fingerprint(samples: Samples) -> dict[str, tuple[tuple[int, ...], str, str]]:
+    return {
+        k: (
+            v.shape,
+            str(v.dtype),
+            hashlib.sha256(np.ascontiguousarray(v).tobytes()).hexdigest()[:16],
+        )
+        for k, v in samples.items()
+    }
+
+
+def test_self_play_flag_off_matches_pre_carry_golden() -> None:
+    backend = MLPBackend((16,))
+    samples, stats, carry = self_play(
+        n_samples=8, batch_size=2, seed=0, temperature=1.0, record_value=True,
+        **_jitted(_uniform_weights_value, backend),
+    )  # fmt: skip
+    assert carry is None  # nothing survives a non-persistent call
+    assert (stats.env_steps, stats.recorded, stats.discarded) == _GOLDEN_STATS
+    assert _fingerprint(samples) == _GOLDEN_ARRAYS
+
+
+def test_persistent_carry_two_calls_equal_one_long_call() -> None:
+    # The carry's defining property: collection is a continuous stream cut at
+    # sample counts, not restarted per call. Two carried calls of N must produce
+    # exactly the concatenation the single 2N call produces -- same env stepping,
+    # same RNG stream, same flush order -- including the overshoot (a finished
+    # game flushes whole, so the first call returns past N and the second's
+    # target accounts for that surplus).
+    backend = MLPBackend((16,))
+    j = _jitted(_uniform_legal_dist, backend)
+    n = 250
+    first, s1, carry = self_play(
+        n_samples=n, batch_size=2, seed=1, temperature=1.0, persistent=True, **j
+    )
+    assert carry is not None
+    assert s1.recorded > n  # the overshoot the surplus must account for
+    second, s2, carry2 = self_play(
+        n_samples=n, batch_size=2, seed=1, temperature=1.0, persistent=True,
+        carry=carry, **j,
+    )  # fmt: skip
+    assert carry2 is not None and s2.recorded > 0  # the second call really played
+    long, sl, _ = self_play(
+        n_samples=2 * n, batch_size=2, seed=1, temperature=1.0, **j
+    )  # fmt: skip
+    assert s1.env_steps + s2.env_steps == sl.env_steps
+    assert s1.recorded + s2.recorded == sl.recorded
+    assert set(first) == set(second) == set(long)
+    for k in long:
+        joined = np.concatenate([first[k], second[k]])
+        assert np.array_equal(joined, long[k]), f"{k} diverged from the long call"
+
+
+def test_persistent_discard_counts_only_trims() -> None:
+    # Flag off, the unfinished games are thrown away at the call boundary (the
+    # iteration waste). Flag on, they stay in the carry, so `discarded` counts
+    # only `max_game_len` trims -- zero for games that never reach the cap.
+    backend = MLPBackend((16,))
+    j = _jitted(_uniform_legal_dist, backend)
+    _, fresh, none_carry = self_play(
+        n_samples=200, batch_size=2, seed=1, temperature=1.0, **j
+    )
+    assert none_carry is None and fresh.discarded > 0
+    _, stats, carry = self_play(
+        n_samples=200, batch_size=2, seed=1, temperature=1.0, persistent=True, **j
+    )
+    assert carry is not None
+    assert stats.recorded == fresh.recorded  # the first call collects identically
+    assert stats.discarded == 0
+    assert any(carry.pending)  # the in-flight game survived instead
 
 
 def test_runstate_serialise_roundtrip_is_bit_exact(tmp_path: Path) -> None:
@@ -281,7 +373,7 @@ def test_self_play_value_is_acting_seat_win_loss() -> None:
     # both-classes-present check is the strongest lane-agnostic form of the
     # complementary-per-game property.)
     backend = MLPBackend((16,))
-    samples, _ = self_play(
+    samples, _, _ = self_play(
         n_samples=16, batch_size=4, seed=0, temperature=0.0,
         **_jitted(_uniform_weights, backend),
     )  # fmt: skip
@@ -297,7 +389,7 @@ def test_self_play_policy_target_is_legal() -> None:
     # ~1, and -- the load-bearing part -- ZERO mass on illegal actions, since
     # the search may only propose legal moves.
     backend = MLPBackend((16,))
-    samples, _ = self_play(
+    samples, _, _ = self_play(
         n_samples=16, batch_size=4, seed=3, temperature=0.0,
         **_jitted(_uniform_legal_dist, backend),
     )  # fmt: skip
@@ -318,7 +410,7 @@ def test_self_play_excludes_setup_gnn() -> None:
         PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1)
     )
     setup_search = jax.jit(jax.vmap(backend.setup_policy(), in_axes=(0, 0, 0, 0, 0)))
-    samples, _ = self_play(
+    samples, _, _ = self_play(
         n_samples=8, batch_size=4, seed=4, temperature=0.0,
         setup_search=setup_search,
         **_jitted(_uniform_weights, backend),
@@ -402,7 +494,7 @@ def test_train_epochs_is_deterministic_in_key() -> None:
     import optax
 
     backend = MLPBackend((16,))
-    samples, _ = self_play(
+    samples, _, _ = self_play(
         n_samples=16, batch_size=4, seed=0, **_jitted(_uniform_legal_dist, backend)
     )
     optimizer = optax.adamw(1e-3)
@@ -476,7 +568,7 @@ def test_self_play_pcr_marks_fast_positions() -> None:
     # still train the value head).
     backend = MLPBackend((16,))
     j = _jitted(_uniform_legal_dist, backend)
-    samples, _ = self_play(
+    samples, _, _ = self_play(
         n_samples=64, batch_size=8, seed=1,
         fast_search=j["search"], full_prob=0.5, **j,
     )  # fmt: skip
@@ -557,7 +649,7 @@ def test_run_arena_opponent_every_skips_off_rounds(monkeypatch: Any) -> None:
 def test_self_play_no_pcr_marks_all_full() -> None:
     # Default (no fast_search): every position is a full-search position.
     backend = MLPBackend((16,))
-    samples, _ = self_play(
+    samples, _, _ = self_play(
         n_samples=8, batch_size=4, seed=0, **_jitted(_uniform_weights, backend)
     )
     assert np.all(samples["train_policy"] == 1.0)

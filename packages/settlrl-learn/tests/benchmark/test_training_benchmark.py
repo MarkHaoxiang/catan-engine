@@ -176,7 +176,7 @@ def test_selfplay_window(benchmark: Any, device: str) -> None:
         )
 
         def play(seed: int) -> tuple[int, int, int]:
-            samples, stats = run_selfplay(
+            samples, stats, _ = run_selfplay(
                 calls, search, cfg, cfg.selfplay.samples, seed
             )
             return samples["value"].shape[0], stats.env_steps, stats.discarded

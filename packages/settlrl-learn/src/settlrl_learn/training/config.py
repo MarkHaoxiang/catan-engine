@@ -42,6 +42,10 @@ class SelfPlayConfig(_Group):
     temperature: float = 1.0
     max_steps: int = 100_000
     max_game_len: int = 800
+    persistent: bool = False
+    """Keep the self-play env, its games in flight and their RNG alive across
+    calls (a ``SelfPlayCarry``) instead of rebuilding per call, so games finish
+    across iteration boundaries instead of being discarded at them."""
     pcr_full_prob: float = 1.0
     """Playout-cap randomization (KataGo): probability a self-play step runs the
     full ``num_simulations`` search and trains policy on its positions; the rest
