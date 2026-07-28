@@ -37,6 +37,8 @@ jobs:
           packages/settlrl-app/src packages/settlrl-game/src
           packages/settlrl-learn/src
           packages/settlrl-learn/tests/test_learn.py packages/settlrl-learn/tests/test_architectures.py
+          packages/settlrl-learn/tests/test_training.py packages/settlrl-learn/tests/test_elo.py
+          packages/settlrl-learn/tests/benchmark/test_training_benchmark.py
       - run: bash mypy_experiments.sh
       - run: uv run --package settlrl-engine pytest packages/settlrl-engine/tests
       - run: uv run --package settlrl-game pytest packages/settlrl-game

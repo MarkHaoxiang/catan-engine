@@ -51,9 +51,11 @@ the same self-play recipe at increasing iteration counts).
 
 Every framework is type-checked (`mypy_experiments.sh`, on pre-commit and CI).
 `experiments/tests/test_smoke.py` validates every named variant/preset resolves
-(cheap, no JAX) and exercises at most one of them end-to-end at trivial
-budgets, proving the plumbing (config → data/optimisation → bench gate →
-verdict) without a strength claim — keep that run's budgets minimal and its
-`Run` in `tmp_path`. The whole suite fits ~2-3 minutes; a real end-to-end run
-that's still not pre-commit-cheap is marked `slow` (CI-only; pre-commit runs
-`-m "not slow"`).
+(cheap, no JAX) and exercises each framework's distinct real-run surfaces
+end-to-end at trivial budgets — usually one; 0004 keeps three (the ordinary
+run, the separate `mode=bench` wiring, and an anchor-checkpoint
+deserialization check) because each proves a different layer — never a
+strength claim. Keep those runs' budgets minimal and their `Run` in
+`tmp_path`. The whole suite (no marker filter) measures 91-129s cold; the
+heaviest of those runs is marked `slow` so pre-commit (`-m "not slow"`) skips
+it while CI runs the suite unfiltered.

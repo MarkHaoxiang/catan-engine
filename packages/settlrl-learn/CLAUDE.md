@@ -135,6 +135,10 @@ deps only because this subpackage uses them.
     action-ordering lock-out (`settlrl_engine.ordering`): self-play's env runs
     `track_ordering` and the search threads the lock-out deeper; the backends
     carry it for the arena agent too.
+    `loop.selfplay_callables(backend, cfg, net)` builds the once-built
+    jitted+vmapped self-play callables (`view_of` / `observe_of` / `setup_search`
+    + a `make_net_search(num_simulations)` factory closing over the net's *static*
+    part); `learn` and `bench_selfplay` share it so the wiring cannot drift.
   - `training/arena.py::arena` — the net's `ArenaResult(wins, episodes)` vs. a
     `POLICIES` opponent, seat-swapped at 2p (`lookahead` = the Stage-1 gate;
     `random` = the lower-bound sanity check); the play agent comes from
@@ -155,10 +159,6 @@ deps only because this subpackage uses them.
     stay frozen for a run. The per-iter `val_*` / `policy_*` / `value_*` health
     metrics (from `Backend.eval_metrics`) are the cheap high-frequency proxies
     between arena rounds.
-    `loop.selfplay_callables(backend, cfg, net)` builds the once-built
-    jitted+vmapped self-play callables (`view_of` / `observe_of` / `setup_search`
-    + a `make_net_search(num_simulations)` factory closing over the net's *static*
-    part); `learn` and `bench_selfplay` share it so the wiring cannot drift.
     The optimiser is `steps.make_optimizer(cfg.optim)` — adamw, optionally
     preceded by `clip_by_global_norm` (`cfg.optim.grad_clip`, default 1.0; 0
     disables). The clip is stateless, so an unclipped checkpoint must be resumed

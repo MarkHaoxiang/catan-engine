@@ -12,7 +12,7 @@ kernel timing does not depend on trained weights:
   (``make_net_search(64)``) on a mid-game batch, B in {64, 256}. This is
   ``search_step_ms``, the unit the parallel-descent work will move.
 - ``test_selfplay_window`` -- one warmed self-play window
-  (:func:`~settlrl_learn.training.self_play` over
+  (:func:`~settlrl_learn.training.run_selfplay` over
   :func:`~settlrl_learn.training.selfplay_callables`) at a reduced budget.
   The XLA-compiling call runs untimed (``benchmark.pedantic``'s ``setup``),
   so the headline stat is steady-state throughput, on the same footing as
@@ -45,7 +45,7 @@ from settlrl_learn.training import (
     LearnConfig,
     SelfPlayConfig,
     make_optimizer,
-    self_play,
+    run_selfplay,
     selfplay_callables,
 )
 from settlrl_learn.training.config import OptimConfig
@@ -153,7 +153,7 @@ _SELFPLAY_BATCH = 64
 @pytest.mark.benchmark
 @pytest.mark.parametrize("device", _DEVICES)
 def test_selfplay_window(benchmark: Any, device: str) -> None:
-    """Throughput of one warmed self-play window (:func:`self_play` over
+    """Throughput of one warmed self-play window (:func:`run_selfplay` over
     :func:`selfplay_callables`) at a reduced budget -- the loop's dominant
     per-iteration cost. ``setup`` (untimed) pays the XLA compile with one
     self-play call; ``target`` (timed) runs exactly one more, already-warmed
@@ -176,15 +176,9 @@ def test_selfplay_window(benchmark: Any, device: str) -> None:
         )
 
         def play(seed: int) -> tuple[int, int, int]:
-            samples, stats = self_play(
-                search, n_samples=cfg.selfplay.samples,
-                observe_of=calls.observe_of, view_of=calls.view_of,
-                setup_search=calls.setup_search,
-                batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
-                seed=seed, record_value=cfg.value_blend.max > 0,
-                track_ordering=cfg.search.ordered,
-                max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
-            )  # fmt: skip
+            samples, stats = run_selfplay(
+                calls, search, cfg, cfg.selfplay.samples, seed
+            )
             return samples["value"].shape[0], stats.env_steps, stats.discarded
 
         def warmup() -> None:

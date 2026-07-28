@@ -58,7 +58,7 @@ class SelfPlayCallables(NamedTuple):
 
     ``make_net_search(num_simulations)`` builds the net's search: a jitted+vmapped
     callable whose *first* argument is the net's array params (bind them with
-    ``functools.partial`` per weight update -- same shapes, so no recompile).
+    ``functools.partial`` per weight update).
     """
 
     view_of: Callable[..., Any]
@@ -84,8 +84,7 @@ def selfplay_callables(
 ) -> SelfPlayCallables:
     """Build the self-play callables ONCE for ``net``'s architecture -- the search
     closes over the net's *static* (non-array) part and takes its arrays as a
-    traced arg, so a weight update is a new value of a same-shaped input (no
-    per-iteration recompile). Shared by :func:`learn` and
+    traced arg. Shared by :func:`learn` and
     :func:`~settlrl_learn.training.bench.bench_selfplay`."""
     s = cfg.search
     setup_fn = backend.setup_policy()
@@ -114,6 +113,31 @@ def selfplay_callables(
         return jax.jit(jax.vmap(_net_weights, in_axes=(None, 0, 0, 0, 0, 0)))
 
     return SelfPlayCallables(view_of, observe_of, setup_search, make_net_search)
+
+
+def run_selfplay(
+    calls: SelfPlayCallables,
+    search: Any,
+    cfg: LearnConfig,
+    n: int,
+    seed: int,
+    *,
+    fast_search: Any = None,
+    full_prob: float = 1.0,
+) -> tuple[Samples, SelfPlayStats]:
+    """:func:`~settlrl_learn.training.selfplay.self_play` over ``calls`` and
+    ``cfg``'s selfplay/search knobs -- shared by :func:`learn`,
+    :func:`~settlrl_learn.training.bench.bench_selfplay`, and the
+    ``test_selfplay_window`` benchmark so the kwarg wiring cannot drift."""
+    return self_play(
+        search, fast_search=fast_search, full_prob=full_prob, n_samples=n,
+        observe_of=calls.observe_of, view_of=calls.view_of,
+        setup_search=calls.setup_search,
+        batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
+        seed=seed, record_value=cfg.value_blend.max > 0,
+        track_ordering=cfg.search.ordered,
+        max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
+    )  # fmt: skip
 
 
 def learn(
@@ -193,14 +217,9 @@ def learn(
         fast_search: Any = None,
         full_prob: float = 1.0,
     ) -> tuple[Samples, SelfPlayStats]:
-        return self_play(
-            search, fast_search=fast_search, full_prob=full_prob, n_samples=n,
-            observe_of=calls.observe_of, view_of=calls.view_of,
-            setup_search=calls.setup_search,
-            batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
-            seed=seed, record_value=blend, track_ordering=s.ordered,
-            max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
-        )  # fmt: skip
+        return run_selfplay(
+            calls, search, cfg, n, seed, fast_search=fast_search, full_prob=full_prob
+        )
 
     iters: Iterable[int] = range(int(state.iteration), cfg.n_iterations)
     bar = None

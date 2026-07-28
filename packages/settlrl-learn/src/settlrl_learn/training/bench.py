@@ -1,7 +1,7 @@
 """Self-play throughput probe: warmed, repeated timings at a fixed net.
 
 The training loop's cost is dominated by self-play, so this times exactly what
-an iteration times (:func:`~settlrl_learn.training.selfplay.self_play` over the
+an iteration times (:func:`~settlrl_learn.training.loop.run_selfplay` over the
 loop's own callables, :func:`~settlrl_learn.training.loop.selfplay_callables`)
 with the net held fixed -- no optimiser, no replay, no arena. The first call is
 untimed (it pays the XLA compile) and the timed repeats all run the identical
@@ -21,8 +21,7 @@ import equinox as eqx
 
 from settlrl_learn.training.backend import Backend
 from settlrl_learn.training.config import LearnConfig
-from settlrl_learn.training.loop import selfplay_callables
-from settlrl_learn.training.selfplay import self_play
+from settlrl_learn.training.loop import run_selfplay, selfplay_callables
 
 
 def bench_selfplay(
@@ -46,26 +45,21 @@ def bench_selfplay(
 
     Raises ``ValueError`` under playout-cap randomization
     (``cfg.selfplay.pcr_full_prob`` < 1): the sims-per-move accounting assumes
-    every step ran the full search."""
+    every step ran the full search. Raises ``ValueError`` if ``repeats`` < 1
+    (the median over zero timed repeats is undefined)."""
     if cfg.selfplay.pcr_full_prob < 1.0:
         raise ValueError(
             "bench_selfplay needs pcr_full_prob == 1.0 (playout-cap randomization "
             f"makes sims_per_s meaningless); got {cfg.selfplay.pcr_full_prob}"
         )
+    if repeats < 1:
+        raise ValueError(f"bench_selfplay needs repeats >= 1; got {repeats}")
     calls = selfplay_callables(backend, cfg, net)
     net_search = calls.make_net_search(cfg.search.num_simulations)
     search = functools.partial(net_search, eqx.partition(net, eqx.is_array)[0])
 
     def play(sd: int) -> tuple[int, int, int]:
-        samples, stats = self_play(
-            search, n_samples=cfg.selfplay.samples,
-            observe_of=calls.observe_of, view_of=calls.view_of,
-            setup_search=calls.setup_search,
-            batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
-            seed=sd, record_value=cfg.value_blend.max > 0,
-            track_ordering=cfg.search.ordered,
-            max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
-        )  # fmt: skip
+        samples, stats = run_selfplay(calls, search, cfg, cfg.selfplay.samples, sd)
         return samples["value"].shape[0], stats.env_steps, stats.discarded
 
     for _ in range(warmup):

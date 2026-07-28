@@ -51,21 +51,33 @@ end-to-end coverage at tiny budgets in the owning packages
 including bit-exact resume, `settlrl-search`'s `test_ismcts.py` for
 chance/ordered search) — a framework's *unique* surface here is only the
 composition layer (config groups, `run.py` wiring, the bench gate, a recorded
-verdict), so each framework keeps at most one genuinely tiny real end-to-end
-run to prove that layer, never one per variant. (`conftest.load_run` imports
-a `run.py` by path; the digit-prefixed dirs aren't packages.) A smoke asserts
-only a recorded verdict, never strength.
+verdict), so each framework keeps its real end-to-end runs to only what
+proves a distinct piece of that layer, never one per variant. 0004 keeps
+three: the mlp `smoke` (the ordinary `run_experiment` path — arena, gate,
+verdict), `bench_throughput_smoke` (the separate `mode=bench` wiring the mlp
+path never exercises), and `test_0004_anchor_loads_and_forwards` (not a
+`run_experiment` at all — a deserialization-integrity check that a saved
+anchor checkpoint loads and forwards). (`conftest.load_run` imports a `run.py`
+by path; the digit-prefixed dirs aren't packages.) A smoke asserts only a
+recorded verdict, never strength.
 
 Keep any real end-to-end run's budgets trivial in **every** group — 0004's
 `smoke` once left `arena` at production defaults while the rest was trivial,
-and the arena alone cost 895s of a 907s iteration. Mark a real run `slow` if
-it's still not pre-commit-cheap (pre-commit runs `-m "not slow"`); a pure
-compose/resolve check never needs the marker. `mypy_experiments.sh` checks
-each framework dir separately (the `run.py` modules would collide on one
-invocation) plus `new.py` and the tests; the shared harness is checked by the
-agents package mypy. New frameworks: add a variants-resolve check, at most one
-tiny end-to-end case, and a `test_<nnnn>_*` name so the mypy loop picks the
-dir up automatically.
+and the arena alone cost 895s of a 907s iteration. The whole suite (every
+framework, unfiltered) measures 91-129s cold; JAX's compilation cache persists
+across runs (`~/.cache/jax-settlrl` by default, wired in
+`experiments/tests/conftest.py`), so a warm pre-commit run is cheaper still.
+That's why only the mlp `smoke` — the heaviest of the three real 0004 runs —
+still carries `@pytest.mark.slow` (pre-commit runs `-m "not slow"`; CI runs
+the suite unfiltered): it trims the pre-commit loop, not the measured budget,
+which already holds without it. A pure compose/resolve check never needs the
+marker, and a new real run shouldn't reach for it unless it's dramatically
+heavier than today's. `mypy_experiments.sh` checks each framework dir
+separately (the `run.py` modules would collide on one invocation) plus
+`new.py` and the tests; the shared harness is checked by the agents package
+mypy. New frameworks: add a variants-resolve check, at most one tiny
+end-to-end case, and a `test_<nnnn>_*` name so the mypy loop picks the dir up
+automatically.
 
 ## `0002_linear_value_fitting/` — linear fits over the engineered features
 

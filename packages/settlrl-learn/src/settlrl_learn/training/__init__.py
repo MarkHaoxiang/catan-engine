@@ -32,7 +32,12 @@ from settlrl_learn.training.gnn_backend import (
     make_net_agent,
     setup_policy,
 )
-from settlrl_learn.training.loop import SelfPlayCallables, learn, selfplay_callables
+from settlrl_learn.training.loop import (
+    SelfPlayCallables,
+    learn,
+    run_selfplay,
+    selfplay_callables,
+)
 from settlrl_learn.training.mlp_backend import MLPBackend, mlp_loss
 from settlrl_learn.training.selfplay import SelfPlayStats, self_play
 from settlrl_learn.training.steps import (
@@ -73,6 +78,7 @@ __all__ = [
     "mlp_loss",
     "prepare_targets",
     "run_arena",
+    "run_selfplay",
     "save_run_state",
     "self_play",
     "selfplay_callables",
