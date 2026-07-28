@@ -227,6 +227,69 @@ def test_self_play_flag_off_matches_pre_carry_golden() -> None:
     assert _fingerprint(samples) == _GOLDEN_ARRAYS
 
 
+def test_temperature_moves_zero_matches_flag_off_golden() -> None:
+    # `temperature_moves=0` (its default) must reproduce the pre-anneal golden
+    # fingerprint exactly -- passing it explicitly draws no extra RNG and changes
+    # no behavior.
+    backend = MLPBackend((16,))
+    samples, stats, carry = self_play(
+        n_samples=8, batch_size=2, seed=0, temperature=1.0, record_value=True,
+        temperature_moves=0,
+        **_jitted(_uniform_weights_value, backend),
+    )  # fmt: skip
+    assert carry is None
+    assert (stats.env_steps, stats.recorded, stats.discarded) == _GOLDEN_STATS
+    assert _fingerprint(samples) == _GOLDEN_ARRAYS
+
+
+def test_temperature_moves_anneal_then_argmax_is_key_independent() -> None:
+    # K=1: a lane's first recorded move samples at `temperature`; every move
+    # after is argmax, independent of which key drives it. We fork an in-flight
+    # carry (same board, two different keys) via the padded round trip -- the
+    # env is a held *object*, so it can't be forked by sharing a reference --
+    # and confirm the post-K step lands on the same board state either way.
+    backend = MLPBackend((16,))
+    j = _jitted(_uniform_legal_dist, backend)
+    _, _, carry = self_play(
+        n_samples=10_000, batch_size=1, seed=0, temperature=5.0,
+        temperature_moves=1, persistent=True, max_steps=1, **j,
+    )  # fmt: skip
+    assert carry is not None and len(carry.pending[0]) == 1  # move 0 recorded
+    padded = to_padded(carry, max_game_len=800)
+    carry_a = from_padded(padded, track_ordering=False)._replace(key=jax.random.key(11))
+    carry_b = from_padded(padded, track_ordering=False)._replace(key=jax.random.key(22))
+    kwargs = {
+        "n_samples": 10_000, "batch_size": 1, "temperature": 5.0,
+        "temperature_moves": 1, "persistent": True, "max_steps": 1,
+    }  # fmt: skip
+    _, _, carry_a2 = self_play(carry=carry_a, **kwargs, **j)  # type: ignore[arg-type]
+    _, _, carry_b2 = self_play(carry=carry_b, **kwargs, **j)  # type: ignore[arg-type]
+    assert carry_a2 is not None and carry_b2 is not None
+
+    def _plain(x: Array) -> np.ndarray:
+        if jnp.issubdtype(x.dtype, jax.dtypes.prng_key):
+            return np.asarray(jax.random.key_data(x))
+        return np.asarray(x)
+
+    state_a = jax.tree.map(_plain, carry_a2.env.board[1])
+    state_b = jax.tree.map(_plain, carry_b2.env.board[1])
+    assert eqx.tree_equal(state_a, state_b) is True
+
+
+def test_persistent_counter_survives_carry_round_trip() -> None:
+    # The anneal counter is the per-lane recorded-move count, `len(pending[lane])`
+    # -- no new carry field, since `pending_len` already is that count (it resets
+    # to 0 when a lane's game flushes, and only undercounts once a lane is
+    # trimmed past `max_game_len`, at which point the count is already far past
+    # any sane `temperature_moves`). A round trip must preserve it exactly.
+    carry = _mid_game_carry()
+    counts = [len(lane) for lane in carry.pending]
+    padded = to_padded(carry, max_game_len=800)
+    assert padded.pending_len.tolist() == counts
+    restored = from_padded(padded, track_ordering=False)
+    assert [len(lane) for lane in restored.pending] == counts
+
+
 def test_persistent_carry_two_calls_equal_one_long_call() -> None:
     # The carry's defining property: collection is a continuous stream cut at
     # sample counts, not restarted per call. Two carried calls of N must produce

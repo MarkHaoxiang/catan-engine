@@ -345,6 +345,7 @@ def self_play(
     n_players: int = 2,
     batch_size: int = 16,
     temperature: float = 1.0,
+    temperature_moves: int = 0,
     seed: int = 0,
     max_steps: int = 100_000,
     max_game_len: int = 800,
@@ -373,6 +374,11 @@ def self_play(
     value, but the ``train_policy`` flag is 1 only on full-search positions (0 on
     fast) so the policy loss trains on deep targets only. ``full_prob`` = 1
     disables it (every position ``train_policy`` = 1).
+
+    ``temperature_moves`` > 0 samples a lane's first that many *recorded* moves
+    of its current game at ``temperature``, then argmax for the rest (0, the
+    default, keeps ``temperature`` flat for the whole game). Counted per lane
+    by its live pending length, so it resets when a lane's game flushes.
 
     ``max_steps`` caps the env-step budget and ``max_game_len`` each lane's
     retained pending positions -- a cold/degenerate net can drag a game out
@@ -438,6 +444,13 @@ def self_play(
         else:
             weights = result
         move = _sample_moves(k_move, weights, mask, temperature)
+        if temperature_moves > 0:
+            # Per-lane anneal: argmax once a lane's game has this many recorded
+            # moves. `len(pending[lane])` is the recorded-move count so far this
+            # game (see the docstring); no extra RNG draw either way.
+            counts = jnp.asarray([len(pending[lane]) for lane in range(batch_size)])
+            argmax_move = jnp.argmax(jnp.where(mask, weights, -jnp.inf), axis=-1)
+            move = jnp.where(counts < temperature_moves, move, argmax_move)
         # Setup-phase lanes play (unrecorded) via the fixed setup policy.
         is_setup = (
             np.asarray(state.phase <= int(GamePhase.SETUP_ROAD))

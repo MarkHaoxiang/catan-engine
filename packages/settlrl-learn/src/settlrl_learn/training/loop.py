@@ -150,6 +150,7 @@ def run_selfplay(
         observe_of=calls.observe_of, view_of=calls.view_of,
         setup_search=calls.setup_search,
         batch_size=cfg.selfplay.batch, temperature=cfg.selfplay.temperature,
+        temperature_moves=cfg.selfplay.temperature_moves,
         seed=seed, record_value=cfg.value_blend.max > 0,
         track_ordering=cfg.search.ordered,
         max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,

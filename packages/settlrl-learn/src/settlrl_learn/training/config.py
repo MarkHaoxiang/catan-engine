@@ -40,6 +40,9 @@ class SelfPlayConfig(_Group):
     samples: int = 2048
     batch: int = 64
     temperature: float = 1.0
+    temperature_moves: int = 0
+    """> 0: a lane samples at `temperature` for its first this many recorded
+    moves of the current game, then argmax (0 keeps `temperature` flat)."""
     max_steps: int = 100_000
     max_game_len: int = 800
     persistent: bool = False

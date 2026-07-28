@@ -130,6 +130,14 @@ deps only because this subpackage uses them.
     fast (cheap `fast_search`); every position records its outcome value, but the
     `train_policy` flag is 1 only on full-search positions, so the policy loss
     trains on deep targets only (value on all). `full_prob` = 1 disables it.
+    **Opening-temperature anneal** (`temperature_moves` > 0): a lane samples at
+    `temperature` for its first that many *recorded* moves of its current game,
+    then argmax for the rest — counted off the live pending length
+    (`len(pending[lane])`), which is already the per-lane recorded-move count
+    (resets on flush; only undercounts once a lane is trimmed past
+    `max_game_len`, by which point the count is already far past any sane
+    `temperature_moves`), so no carry field was added for it. 0 (the default)
+    keeps `temperature` flat and draws no extra RNG.
     Returns `(Samples, SelfPlayStats, SelfPlayCarry | None)`: `env_steps`
     (batched env steps, each advancing all lanes), `recorded`, and `discarded` —
     positions generated but never returned, i.e. the pending buffers of games
