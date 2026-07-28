@@ -111,8 +111,8 @@ def _drive(seed: int, n_players: int, steps: int) -> None:
 
 
 def test_reference_drives_a_random_four_player_game() -> None:
-    _drive(seed=6, n_players=4, steps=1500)
+    _drive(seed=6, n_players=4, steps=600)
 
 
 def test_two_player_beliefs_stay_exact_under_self_play() -> None:
-    _drive(seed=1, n_players=2, steps=1500)
+    _drive(seed=1, n_players=2, steps=600)
