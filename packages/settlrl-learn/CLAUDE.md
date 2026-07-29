@@ -227,14 +227,20 @@ deps only because this subpackage uses them.
     the whole search config + the value-blend factory choice, and the net's
     static): a fresh closure is a jit cache miss, so an uncached second `learn`
     in one process re-traced every self-play jit — a measured ~68 s startup spike
-    at scale, and the floor under the test suite's repeated miniature runs.
+    at scale (8.49 s → 1.54 s per warm `learn` even on the tiny test config,
+    against a cache-clear control). It does **not** move the test-suite floor
+    (65 s → 83 s over the split: xdist workers are separate processes, most tests
+    build a fresh backend, and the XLA disk cache already absorbs the compiles).
     Reuse is semantically free (the callables are pure in that key; the net's
-    arrays are a traced argument, never closed over) and the bit-exact resume
-    tests gate it. The key deliberately omits `selfplay.batch` and the seat count
-    — those ride the traced arguments' shapes, which jax keys its own cache on —
-    and the setup knobs, which live on the backend. Two nets of one architecture
-    have equal statics (verified on a hit rather than assumed, so a
-    differently-shaped net rebuilds instead of silently reusing).
+    arrays are a traced argument, never closed over) and
+    `test_selfplay_callables_*` pins it: the warm-hit `learn` must reproduce the
+    cold-built one leaf-for-leaf. The key deliberately omits `selfplay.batch` and
+    the seat count — those ride the traced arguments' shapes, which jax keys its
+    own cache on — and the setup knobs, which live on the backend. The static
+    check on a hit compares *treedef and non-array fields*, not array shapes
+    (`AZParams` statics are all-`None`, so two MLP widths compare equal) — it
+    catches a structurally different net reaching an entry, while a same-shape
+    different-width net is already separated by its backend's identity.
   - `training/arena.py::arena` — the net's `ArenaResult(wins, episodes)` vs. a
     `POLICIES` opponent, seat-swapped at 2p (`lookahead` = the Stage-1 gate;
     `random` = the lower-bound sanity check); the play agent comes from

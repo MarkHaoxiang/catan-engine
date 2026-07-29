@@ -88,24 +88,20 @@ def _weights_factory(cfg: LearnConfig) -> tuple[Any, dict[str, Any]]:
 
 
 def _callables_key(cfg: LearnConfig) -> tuple[str, bool]:
-    """Everything :func:`selfplay_callables` bakes into its traced program: the
-    whole search config (all of it reaches the search factory) and whether value
-    blending selects the root-value-returning one. Batch and seat counts are not
-    in it -- they ride the traced arguments' shapes, which jax keys its own
-    compilation cache on -- and neither are the setup knobs, which live on the
-    backend (keyed by identity)."""
+    """The config half of the :data:`_CALLABLES_CACHE` key: the whole search
+    config plus the value-blend factory choice."""
     return cfg.search.model_dump_json(), cfg.value_blend.max > 0
 
 
-_CALLABLES_CACHE: dict[
-    tuple[int, tuple[str, bool]], tuple[Any, Any, SelfPlayCallables]
-] = {}
-"""``(id(backend), config key) -> (backend, net static, callables)``. The backend
-rides in the *value* so the cache holds it alive -- its ``id`` cannot then be
-recycled by a later object while the entry exists. The static rides along so a
-hit *checks* the same-architecture assumption instead of assuming it (two nets of
-one architecture have equal statics; a differently-shaped net rebuilds). Unbounded:
-a process runs a handful of configurations."""
+class _CachedCallables(NamedTuple):
+    backend: Any
+    net_static: Any
+    calls: SelfPlayCallables
+
+
+_CALLABLES_CACHE: dict[tuple[int, tuple[str, bool]], _CachedCallables] = {}
+"""``(id(backend), config key) -> `` the entry built under it. Unbounded; the
+backend rides in the value, so the ``id`` it is keyed by stays reserved."""
 
 
 def selfplay_callables(
@@ -123,10 +119,10 @@ def selfplay_callables(
     key = (id(backend), _callables_key(cfg))
     net_static = eqx.partition(net, eqx.is_array)[1]
     hit = _CALLABLES_CACHE.get(key)
-    if hit is not None and eqx.tree_equal(hit[1], net_static):
-        return hit[2]
+    if hit is not None and eqx.tree_equal(hit.net_static, net_static):
+        return hit.calls
     calls = _build_selfplay_callables(backend, cfg, net_static)
-    _CALLABLES_CACHE[key] = (backend, net_static, calls)
+    _CALLABLES_CACHE[key] = _CachedCallables(backend, net_static, calls)
     return calls
 
 
@@ -144,9 +140,8 @@ def _build_selfplay_callables(
         else None
     )
 
-    # Memoised too: `make_net_search` builds a *fresh* closure per call, and a
-    # fresh closure is a jit cache miss -- so without this the caching above
-    # would save the encoders but not the search itself.
+    # Memoised so repeated calls return the *same* jitted object (a fresh
+    # closure would be a jit cache miss).
     @functools.cache
     def make_net_search(num_simulations: int) -> Any:
         def _net_weights(

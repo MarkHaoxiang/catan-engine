@@ -512,12 +512,16 @@ def test_mlp_loss_masks_policy_by_train_policy() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_selfplay_callables_are_built_once_per_backend_and_config(
+def test_selfplay_callables_warm_hit_is_bit_exact_with_the_cold_build(
     monkeypatch: Any,
 ) -> None:
-    # Two `learn` calls over one backend must reuse the jitted self-play
-    # callables rather than re-trace them (the startup cost of every extra
-    # `learn` in a process). Counted at the builder, not the clock.
+    # The cache's soundness gate, and the only test where a *warm hit* drives a
+    # run: `learn` is a pure function of (backend, cfg), so two calls over ONE
+    # backend must agree leaf-for-leaf -- but the first builds the self-play
+    # callables and the second reuses them, so agreement here is exactly
+    # "reusing the jitted callables changes no bit". The resume tests cannot say
+    # this: they build a fresh backend per call, so every one of theirs is a cold
+    # miss. Reuse is counted at the builder, not the clock.
     builds: list[int] = []
     real = loop._build_selfplay_callables
 
@@ -528,25 +532,34 @@ def test_selfplay_callables_are_built_once_per_backend_and_config(
     monkeypatch.setattr(loop, "_build_selfplay_callables", counted)
     backend = MLPBackend((16,))
     cfg = _learn_cfg(1, num_simulations=0)
-    a = learn(backend, cfg)
-    b = learn(backend, cfg)
-    assert len(builds) == 1
+    seen: list[float] = []
+    cold = learn(backend, cfg, on_iter=lambda i, m, n: seen.append(m["samples"]))
+    warm = learn(backend, cfg)
+    assert len(builds) == 1  # the second run really was a hit
+    assert sum(seen) > 0, "no self-play samples trained -- the comparison is vacuous"
+    _assert_nets_bit_exact(cold, warm)
     # and the *same* jitted objects come back -- a fresh closure would be a jit
     # cache miss even at an unchanged cache size.
-    ca = selfplay_callables(backend, cfg, a)
-    cb = selfplay_callables(backend, cfg, b)
+    ca = selfplay_callables(backend, cfg, cold)
+    cb = selfplay_callables(backend, cfg, warm)
     assert ca is cb and ca.make_net_search(0) is cb.make_net_search(0)
 
 
-def test_selfplay_callables_rebuild_for_another_architecture() -> None:
-    # The cache is keyed on the backend and the net's static, so a different
-    # architecture gets its own entry rather than the first one's search.
+def test_selfplay_callables_rebuild_for_another_net_structure() -> None:
+    # Two backends never share an entry (the key holds each one's identity), and
+    # a second net of the same architecture reuses its backend's entry -- the
+    # static-equality check passing, which is what lets a trained net reuse the
+    # callables built for the freshly-initialised one.
     cfg = _learn_cfg(1, num_simulations=0)
     small, wide = MLPBackend((16,)), MLPBackend((8, 8))
     a = selfplay_callables(small, cfg, small.init(jax.random.key(0)))
     b = selfplay_callables(wide, cfg, wide.init(jax.random.key(0)))
     assert a is not b
     assert selfplay_callables(small, cfg, small.init(jax.random.key(1))) is a
+    # ... and the check fails closed: a net whose static *treedef* differs from
+    # the entry's rebuilds rather than silently reusing another structure's
+    # search, even at that entry's own key.
+    assert selfplay_callables(small, cfg, wide.init(jax.random.key(0))) is not a
 
 
 def test_selfplay_callables_rebuild_when_the_search_config_changes() -> None:
