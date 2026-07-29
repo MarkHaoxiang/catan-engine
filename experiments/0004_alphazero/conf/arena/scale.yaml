@@ -9,3 +9,9 @@ anchor_elos:
   random: -800.0
 opponent_every:
   random: 5         # random has been 1.0 from iter ~9 on -- sample it, not every round
+net_opponents:
+  # the frozen az0 checkpoint as a mid-rung between random and lookahead.
+  # elo is provisional (its 0.361 vs lookahead => ~-99); a calibration run pins it.
+  az0_gnn96x4:
+    elo: -100.0
+    every: 1

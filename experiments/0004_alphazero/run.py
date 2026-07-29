@@ -22,6 +22,7 @@ import jax
 import wandb
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, ConfigDict, Field
+from settlrl_agents import BeliefSpec
 from settlrl_learn import save_az_params
 from settlrl_learn.experiment import Config, Run, start_run
 from settlrl_learn.training import (
@@ -61,6 +62,21 @@ class NetConfig(_Sub):
     setup_beam: int = 4
 
 
+class ArenaNetOpponent(_Sub):
+    """A frozen checkpoint at the arena table: pinned Elo + play-every-N schedule
+    for the ``anchors/`` artifact of the same name."""
+
+    elo: float
+    every: int = 1
+
+
+class ArenaSettings(ArenaConfig):
+    """The loop's arena knobs plus the experiment-only frozen-checkpoint rungs:
+    the loop takes ready play specs (not config), so this only *names* them."""
+
+    net_opponents: dict[str, ArenaNetOpponent] = Field(default_factory=dict)
+
+
 class WandbConfig(_Sub):
     mode: Literal["online", "offline", "disabled"] = "online"
     project: str = "settlrl-0004-alphazero"
@@ -94,7 +110,7 @@ class AlphaZeroConfig(Config):
     teacher: TeacherConfig = Field(default_factory=TeacherConfig)
     value_blend: ValueBlendConfig = Field(default_factory=ValueBlendConfig)
     eval: EvalConfig = Field(default_factory=EvalConfig)
-    arena: ArenaConfig = Field(default_factory=ArenaConfig)
+    arena: ArenaSettings = Field(default_factory=ArenaSettings)
 
     def to_learn_config(self) -> LearnConfig:
         """Pack the loop groups into the net-agnostic ``LearnConfig``."""
@@ -103,8 +119,40 @@ class AlphaZeroConfig(Config):
             checkpoint_every=self.checkpoint_every,
             search=self.search, selfplay=self.selfplay, optim=self.optim,
             replay=self.replay, teacher=self.teacher, value_blend=self.value_blend,
-            eval=self.eval, arena=self.arena,
+            eval=self.eval,
+            arena=ArenaConfig(**self.arena.model_dump(exclude={"net_opponents"})),
         )  # fmt: skip
+
+
+def build_net_opponents(
+    cfg: AlphaZeroConfig,
+) -> dict[str, tuple[BeliefSpec, float, int]]:
+    """The specs `learn` seats for ``cfg.arena.net_opponents``: each named anchor
+    loaded from ``anchors/`` and played by its own GNN search at the arena's
+    budget, under this run's setup opener and search semantics."""
+    # same-dir sibling module (see run_bench's note on sys.path).
+    from anchors import load_anchor
+
+    s = cfg.search
+    out: dict[str, tuple[BeliefSpec, float, int]] = {}
+    for name, opp in cfg.arena.net_opponents.items():
+        net, netcfg = load_anchor(name)
+        backend = GNNBackend(
+            netcfg, setup_depth=cfg.net.setup_depth,
+            setup_temperature=cfg.net.setup_temperature, setup_beam=cfg.net.setup_beam,
+            chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
+        )  # fmt: skip
+        agent = backend.play_agent(
+            net,
+            num_simulations=cfg.arena.sims,
+            max_num_considered_actions=cfg.arena.considered,
+        )
+        out[name] = (
+            BeliefSpec(lambda agent=agent: agent, frozenset((2,))),
+            opp.elo,
+            opp.every,
+        )
+    return out
 
 
 def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
@@ -164,6 +212,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             backend,
             cfg.to_learn_config(),
             teacher_value=heuristic_value if cfg.teacher.enabled else None,
+            net_opponents=build_net_opponents(cfg),
             checkpoint_dir=run.dir,
             resume_from=resume,
             on_iter=on_iter,
@@ -270,6 +319,7 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         final = learn(
             backend,
             cfg.to_learn_config(),
+            net_opponents=build_net_opponents(cfg),
             checkpoint_dir=run.dir,
             resume_from=resume_from,
             on_iter=on_iter,

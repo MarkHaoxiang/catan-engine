@@ -10,13 +10,14 @@ A training-side module: not imported by the package root.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import jax
 import optax
 from jaxtyping import Array
 
-from settlrl_learn.training.arena import arena
+from settlrl_learn.training.arena import OpponentSpec, arena, arena_spec
 from settlrl_learn.training.backend import Backend
 from settlrl_learn.training.config import ArenaConfig, OptimConfig
 from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
@@ -81,8 +82,20 @@ def evaluate(backend: Backend, net: Any, ev: Samples) -> dict[str, float]:
     return {kk: float(vv) for kk, vv in vm.items()}
 
 
+NET_OPPONENT_SEED_BASE = 50_000
+"""Seed offset for ``run_arena``'s net opponents, disjoint from the registry
+opponents' ``seed + j*10_000`` so adding one never shifts their games (holds for
+up to five registry opponents)."""
+
+
 def run_arena(
-    backend: Backend, net: Any, cfg: ArenaConfig, *, seed: int, round_index: int
+    backend: Backend,
+    net: Any,
+    cfg: ArenaConfig,
+    *,
+    seed: int,
+    round_index: int,
+    net_opponents: Mapping[str, tuple[OpponentSpec, float, int]] | None = None,
 ) -> dict[str, float]:
     """Play the net against each configured opponent; ``lookahead`` -> the gate
     metric ``arena_winrate``, others -> ``arena_vs_<opponent>``, plus ``arena_elo``
@@ -94,7 +107,13 @@ def run_arena(
     ``round_index`` counts arena invocations (not training iterations); an
     opponent with ``cfg.opponent_every[opp] = N`` is skipped unless
     ``round_index % N == 0``, contributing no metric and no Elo input that
-    round."""
+    round.
+
+    ``net_opponents`` maps a name to ``(spec, anchor_elo, every)``: a pre-built
+    opponent (e.g. a frozen checkpoint's play agent) played alongside the registry
+    ones under the same seat-swap, scheduling and Elo MLE, reported as
+    ``arena_vs_<name>``. Their seeds start at ``seed + NET_OPPONENT_SEED_BASE``,
+    so the registry opponents' games are identical with and without them."""
     metrics: dict[str, float] = {}
     elo_inputs: list[tuple[float, float, int]] = []
     for j, opp in enumerate(cfg.opponents):
@@ -111,6 +130,17 @@ def run_arena(
         )
         if opp in cfg.anchor_elos:
             elo_inputs.append((cfg.anchor_elos[opp], res.wins, res.episodes))
+    for k, (name, (spec, elo, every)) in enumerate((net_opponents or {}).items()):
+        if every > 1 and round_index % every != 0:
+            continue
+        res = arena_spec(
+            backend, net, opponent=spec, n_games=cfg.games,
+            num_simulations=cfg.sims, batch_size=cfg.batch,
+            max_num_considered_actions=cfg.considered,
+            seed=seed + NET_OPPONENT_SEED_BASE + k * 10_000,
+        )  # fmt: skip
+        metrics[f"arena_vs_{name}"] = res.winrate
+        elo_inputs.append((elo, res.wins, res.episodes))
     if elo_inputs:
         metrics["arena_elo"] = anchored_elo(elo_inputs)
         metrics["arena_elo_se"] = anchored_elo_se(elo_inputs)

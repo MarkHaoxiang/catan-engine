@@ -57,7 +57,9 @@ three: the mlp `smoke` (the ordinary `run_experiment` path — arena, gate,
 verdict), `bench_throughput_smoke` (the separate `mode=bench` wiring the mlp
 path never exercises), and `test_0004_anchor_loads_and_forwards` (not a
 `run_experiment` at all — a deserialization-integrity check that a saved
-anchor checkpoint loads and forwards). (`conftest.load_run` imports a `run.py`
+anchor checkpoint loads and forwards; `test_0004_builds_net_opponent_specs`
+rides the same load to check the frozen-checkpoint arena rung composes into a
+seatable spec, still without playing a game). (`conftest.load_run` imports a `run.py`
 by path; the digit-prefixed dirs aren't packages.) A smoke asserts only a
 recorded verdict, never strength.
 

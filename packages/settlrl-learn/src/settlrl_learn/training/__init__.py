@@ -6,7 +6,7 @@ Training-side (equinox/optax/flashbax): not imported by the package root, so the
 shipped plain-JAX play path stays dependency-light.
 """
 
-from settlrl_learn.training.arena import ArenaResult, arena
+from settlrl_learn.training.arena import ArenaResult, OpponentSpec, arena, arena_spec
 from settlrl_learn.training.backend import (
     Backend,
     RunState,
@@ -56,6 +56,7 @@ __all__ = [
     "GNNBackend",
     "LearnConfig",
     "MLPBackend",
+    "OpponentSpec",
     "OptimConfig",
     "ReplayConfig",
     "RunState",
@@ -68,6 +69,7 @@ __all__ = [
     "ValueBlendConfig",
     "anchored_elo",
     "arena",
+    "arena_spec",
     "bench_selfplay",
     "evaluate",
     "expected_score",

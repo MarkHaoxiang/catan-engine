@@ -1,4 +1,5 @@
-"""The Stage-1 gate: the net's win rate vs. a fixed ``POLICIES`` opponent,
+"""The Stage-1 gate: the net's win rate vs. a fixed opponent -- a ``POLICIES``
+entry or any pre-built spec (e.g. a frozen checkpoint's play agent) --
 seat-swapped at 2p.
 
 A learned value worth shipping beats ``lookahead(heuristic)``; ``random`` is the
@@ -12,9 +13,19 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
-from settlrl_agents import POLICIES, BeliefSpec, evaluate
+from settlrl_agents import (
+    POLICIES,
+    BeliefSpec,
+    ObservationSpec,
+    StatefulSpec,
+    evaluate,
+)
 
 from settlrl_learn.training.backend import Backend
+
+OpponentSpec = ObservationSpec | BeliefSpec | StatefulSpec
+"""Any seatable opponent: a ``POLICIES`` entry or a spec built elsewhere (e.g.
+an experiment wrapping a frozen checkpoint's play agent)."""
 
 
 class ArenaResult(NamedTuple):
@@ -28,18 +39,18 @@ class ArenaResult(NamedTuple):
         return self.wins / max(self.episodes, 1)
 
 
-def arena(
+def arena_spec(
     backend: Backend,
     net: Any,
     *,
-    opponent: str = "lookahead",
+    opponent: OpponentSpec,
     n_games: int = 40,
     num_simulations: int = 64,
     max_num_considered_actions: int = 16,
     batch_size: int = 16,
     seed: int = 0,
 ) -> ArenaResult:
-    """The net's wins/episodes vs. ``POLICIES[opponent]``, seat-swapped at 2p.
+    """The net's wins/episodes vs. a pre-built opponent spec, seat-swapped at 2p.
 
     ``episodes`` is the actual completed-game count and may differ from the
     requested ``n_games``."""
@@ -52,10 +63,31 @@ def arena(
         )
 
     net_spec = BeliefSpec(make_agent, frozenset((2,)))
-    base = POLICIES[opponent]
     half = max(1, n_games // 2)
-    r1 = evaluate([net_spec, base], n_episodes=half, batch_size=batch_size, seed=seed)
+    r1 = evaluate(
+        [net_spec, opponent], n_episodes=half, batch_size=batch_size, seed=seed
+    )
     r2 = evaluate(
-        [base, net_spec], n_episodes=half, batch_size=batch_size, seed=seed + 1
+        [opponent, net_spec], n_episodes=half, batch_size=batch_size, seed=seed + 1
     )
     return ArenaResult(float(r1.wins[0] + r2.wins[1]), int(r1.episodes + r2.episodes))
+
+
+def arena(
+    backend: Backend,
+    net: Any,
+    *,
+    opponent: str = "lookahead",
+    n_games: int = 40,
+    num_simulations: int = 64,
+    max_num_considered_actions: int = 16,
+    batch_size: int = 16,
+    seed: int = 0,
+) -> ArenaResult:
+    """:func:`arena_spec` against the registry entry ``POLICIES[opponent]``."""
+    return arena_spec(
+        backend, net, opponent=POLICIES[opponent], n_games=n_games,
+        num_simulations=num_simulations,
+        max_num_considered_actions=max_num_considered_actions,
+        batch_size=batch_size, seed=seed,
+    )  # fmt: skip

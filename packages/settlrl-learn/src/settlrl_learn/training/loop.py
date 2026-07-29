@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import functools
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -39,6 +39,7 @@ from settlrl_search import (
     make_search_weights_value,
 )
 
+from settlrl_learn.training.arena import OpponentSpec
 from settlrl_learn.training.backend import (
     Backend,
     RunState,
@@ -186,6 +187,7 @@ def learn(
     cfg: LearnConfig,
     *,
     teacher_value: ValueFunction | None = None,
+    net_opponents: Mapping[str, tuple[OpponentSpec, float, int]] | None = None,
     checkpoint_dir: str | Path | None = None,
     resume_from: str | Path | None = None,
     on_iter: Callable[[int, dict[str, float], Any], None] | None = None,
@@ -197,6 +199,11 @@ def learn(
     first ``cfg.teacher.iters`` iterations draw their moves and policy targets from
     a fixed strong search (``cfg.teacher.sims`` simulations) over ``teacher_value``
     instead of the cold net.
+
+    ``net_opponents`` (name -> ``(spec, anchor_elo, every)``) adds pre-built arena
+    opponents alongside ``cfg.arena.opponents`` -- the loop stays agnostic about
+    where a spec comes from, so a frozen checkpoint is composed by the caller
+    (see :func:`~settlrl_learn.training.steps.run_arena`).
 
     The full :class:`RunState` is checkpointed to ``checkpoint_dir/runstate.eqx``
     every ``cfg.checkpoint_every`` iterations; ``resume_from`` continues it
@@ -391,7 +398,7 @@ def learn(
             round_index = (i + 1) // cfg.arena.every
             am = run_arena(
                 backend, net, cfg.arena, seed=cfg.seed + 20_000,
-                round_index=round_index,
+                round_index=round_index, net_opponents=net_opponents,
             )  # fmt: skip
             metrics.update(am)
             metrics["t_arena"] = time.perf_counter() - t2

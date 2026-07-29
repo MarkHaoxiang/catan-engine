@@ -140,3 +140,25 @@ def test_0004_anchor_loads_and_forwards() -> None:
     value_fn, _ = gnn_seams(net)
     v = value_fn(layout, state, jax.numpy.int32(0))
     assert bool(jax.numpy.isfinite(v))
+
+
+def test_0004_scale_arena_names_the_az0_rung() -> None:
+    # The frozen-checkpoint arena rung is config-named (the spec itself is built
+    # in run.py and handed to `learn`), and it must not leak into the library's
+    # ArenaConfig.
+    run = load_run("0004_alphazero")
+    cfg = run.compose_config(["+experiment=small"])
+    az0 = cfg.arena.net_opponents["az0_gnn96x4"]
+    assert (az0.elo, az0.every) == (-100.0, 1)
+    assert not hasattr(cfg.to_learn_config().arena, "net_opponents")
+
+
+def test_0004_builds_net_opponent_specs() -> None:
+    # Composition only: the named anchor loads and becomes a seatable spec at the
+    # arena's budget (no game is played -- that is a GPU-scale cost).
+    run = load_run("0004_alphazero")
+    cfg = run.compose_config(["+experiment=small"])
+    opponents = run.build_net_opponents(cfg)
+    spec, elo, every = opponents["az0_gnn96x4"]
+    assert (elo, every) == (-100.0, 1)
+    assert 2 in spec.n_players and callable(spec.policy)
