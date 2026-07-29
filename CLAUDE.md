@@ -19,6 +19,15 @@ Keep docs concise. User-facing docs (READMEs) describe the **current structure**
 
 Comments should be concise. Doc comments (docstrings) describe only the contract to callers — behavior not evident from the signature; no implementation detail, design motivation, or perf notes (those belong in the per-package `CLAUDE.md`, or are simply omitted).
 
+## Conventions
+
+- **Naming.** A name must read correctly at the call site without the
+  context that defined it — spell out domain words instead of abbreviating.
+  Single letters are for tight math indices only. If a name needs a comment
+  to explain its role, rename it instead.
+- **No speculative generality.** Build an abstraction when its second
+  consumer exists, not before. No dummy/placeholder configs, no dead code.
+
 ## Experiments
 
 ML experiments live in `experiments/` (contract: `experiments/README.md`).
