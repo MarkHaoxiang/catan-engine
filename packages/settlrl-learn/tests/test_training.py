@@ -1054,10 +1054,15 @@ def test_arena_name_path_delegates_to_the_spec_core(monkeypatch: Any) -> None:
     # the dotted path no longer reaches the submodule.
     arena_module = sys.modules["settlrl_learn.training.arena"]
     monkeypatch.setattr(arena_module, "arena_spec", _fake_spec_arena)
-    res = arena(MLPBackend((16,)), object(), opponent="random", n_games=8, seed=3)
+    res = arena(
+        MLPBackend((16,)), object(), opponent="random", n_games=8,
+        num_simulations=17, max_num_considered_actions=5, batch_size=9, seed=3,
+    )  # fmt: skip
     assert res == ArenaResult(1.0, 2)
-    assert seen["opponent"] is POLICIES["random"]
-    assert seen["n_games"] == 8 and seen["seed"] == 3
+    assert seen == {
+        "opponent": POLICIES["random"], "n_games": 8, "num_simulations": 17,
+        "max_num_considered_actions": 5, "batch_size": 9, "seed": 3,
+    }  # fmt: skip
 
 
 def test_run_arena_net_opponent_joins_metrics_and_elo(monkeypatch: Any) -> None:

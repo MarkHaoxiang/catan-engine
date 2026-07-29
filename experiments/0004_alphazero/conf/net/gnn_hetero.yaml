@@ -1,0 +1,9 @@
+kind: gnn
+width: 64
+depth: 2
+layers: 3
+preset: gn_hetero
+value_weight: 1.0
+setup_depth: 1
+setup_temperature: 2.0
+setup_beam: 4

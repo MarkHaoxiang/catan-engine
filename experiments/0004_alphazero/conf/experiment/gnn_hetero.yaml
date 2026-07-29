@@ -1,0 +1,28 @@
+# @package _global_
+defaults:
+  - override /net: gnn_hetero
+  - override /teacher: heuristic
+  - override /search: scale
+  - override /selfplay: scale
+  - override /optim: scale
+  - override /value_blend: scale
+  - override /arena: scale
+net:
+  width: 96
+  layers: 4
+# gnn_hetero: scale2's shape (persistent self-play, opening anneal, PCR) with
+# the heterogeneous trunk (hexes as first-class nodes, `gn_hetero` preset)
+# swapped in for `gn_global` -- an architecture probe over the current best
+# recipe, not a throughput change.
+n_iterations: 300
+checkpoint_every: 10
+selfplay:
+  batch: 512
+  persistent: true
+  temperature_moves: 30
+  pcr_full_prob: 0.25
+  pcr_fast_sims: 16
+search:
+  num_simulations: 128
+replay:
+  buffer_max: 200000

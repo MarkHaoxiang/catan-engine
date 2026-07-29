@@ -10,6 +10,7 @@ net:
   setup_depth: 2
   setup_beam: 4
 n_iterations: 2
+final_games: 4  # the final gauntlet defaults to 400; keep the smoke tiny
 teacher:
   iters: 1
   sims: 4

@@ -1,5 +1,8 @@
 games: 128          # ~= the eval batch (the evaluator overshoots to ~batch anyway)
-every: 10           # arena ~297s each; every 10 keeps eval < ~25% of wall-clock
+every: 10           # arena was ~297s (lookahead+random); the az0 rung below adds
+                    # one more lookahead-grade match every round (same batch/sims),
+                    # roughly doubling that to ~590s; every 10 still keeps eval a
+                    # bounded slice of wall-clock
 batch: 128
 sims: 24
 considered: 16

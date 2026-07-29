@@ -68,7 +68,7 @@ class ArenaNetOpponent(_Sub):
     for the ``anchors/`` artifact of the same name."""
 
     elo: float
-    every: int = 1
+    every: int = Field(default=1, ge=1)
 
 
 class ArenaSettings(ArenaConfig):

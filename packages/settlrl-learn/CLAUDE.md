@@ -221,37 +221,36 @@ deps only because this subpackage uses them.
     `random` = the lower-bound sanity check); the play agent comes from
     `backend.play_agent`. The seat-swap/seed/episode logic lives once, in
     `arena_spec`, which takes a **pre-built** opponent spec; `arena` is the
-    name-based wrapper that resolves `POLICIES`. `episodes` is the real completed-game count, not the
-    requested `n_games` (`evaluate`'s win-count sync happens between scan
-    windows, so it overshoots) — real `(wins, episodes)`, not `winrate * n_games`,
-    feed the Elo MLE. `steps.run_arena` plays each `cfg.arena.opponents` entry and
-    reports `arena_winrate` / `arena_vs_<opp>` **plus `arena_elo`** — the MLE Elo
-    (`training/elo.py::anchored_elo`) on the fixed `cfg.arena.anchor_elos` scale
-    (heuristic pinned at 0 = the gate; random well below) — **and `arena_elo_se`**,
-    its standard error (`anchored_elo_se`, Fisher information at the MLE).
+    name-based wrapper that resolves `POLICIES`. `episodes` is the real
+    completed-game count, not the requested `n_games` (`evaluate`'s win-count sync
+    happens between scan windows, so it overshoots) — real `(wins, episodes)`, not
+    `winrate * n_games`, feed the Elo MLE. `steps.run_arena` plays each
+    `cfg.arena.opponents` entry and reports `arena_winrate` / `arena_vs_<opp>`
+    **plus `arena_elo`** — the MLE Elo (`training/elo.py::anchored_elo`) on the
+    fixed `cfg.arena.anchor_elos` scale (heuristic pinned at 0 = the gate; random
+    well below) — **and `arena_elo_se`**, its standard error (`anchored_elo_se`,
+    Fisher information at the MLE).
     `cfg.arena.opponent_every` (opponent -> N) skips an opponent on rounds where
     `run_arena`'s `round_index` (the loop's count of arena invocations) isn't a
     multiple of N, saving wall-clock on anchors that no longer carry information
-    (e.g. `random`, which pins at 1.0 winrate early). **Frozen checkpoints join
-    the gauntlet** through `learn(..., net_opponents={name: (spec, elo, every)})`
-    → `run_arena`: ready play specs, so the library never learns about checkpoint
+    (e.g. `random`, which pins at 1.0 winrate early). **Frozen checkpoints join the
+    gauntlet** through `learn(..., net_opponents={name: (spec, elo, every)})` →
+    `run_arena`: ready play specs, so the library never learns about checkpoint
     files or architectures — the experiment composes them (0004's
     `anchors.load_anchor` + `GNNBackend.play_agent`; the az0 rung sits at a
-    provisional −100, from its 0.361 vs lookahead). They are scheduled by their
-    own `every`, reported as `arena_vs_<name>`, and join the same Elo MLE; their
-    seeds start at `seed + steps.NET_OPPONENT_SEED_BASE` (50k — room for five
-    registry opponents), so adding one leaves the registry opponents' games
-    bit-identical: a mid-rung must not perturb the curve it refines.
-    The
-    loop holds the arena **seed fixed across iterations** (no `+i`), so every
-    checkpoint faces the same games and the curve is paired (the dice/board luck
-    differences out)
-    — the chosen variance cut, matching canopy/lc0's paired-seed tournaments
-    over a checkpoint round-robin (a within-pool round-robin drifts when the pool
-    changes; the anchored gauntlet stays comparable across runs). Anchors must
-    stay frozen for a run. The per-iter `val_*` / `policy_*` / `value_*` health
-    metrics (from `Backend.eval_metrics`) are the cheap high-frequency proxies
-    between arena rounds.
+    provisional −100, from its 0.361 vs lookahead). They are scheduled by their own
+    `every`, reported as `arena_vs_<name>`, and join the same Elo MLE; their seeds
+    start at `seed + steps.NET_OPPONENT_SEED_BASE` (50k — room for five registry
+    opponents), so adding one leaves the registry opponents' games bit-identical: a
+    mid-rung must not perturb the curve it refines. The loop holds the arena **seed
+    fixed across iterations** (no `+i`), so every checkpoint faces the same games
+    and the curve is paired (the dice/board luck differences out) — the chosen
+    variance cut, matching canopy/lc0's paired-seed tournaments over a checkpoint
+    round-robin (a within-pool round-robin drifts when the pool changes; the
+    anchored gauntlet stays comparable across runs). Anchors must stay frozen for a
+    run. The per-iter `val_*` / `policy_*` / `value_*` health metrics (from
+    `Backend.eval_metrics`) are the cheap high-frequency proxies between arena
+    rounds.
     The optimiser is `steps.make_optimizer(cfg.optim)` — adamw, optionally
     preceded by `clip_by_global_norm` (`cfg.optim.grad_clip`, default 1.0; 0
     disables). The clip is stateless, so an unclipped checkpoint must be resumed
