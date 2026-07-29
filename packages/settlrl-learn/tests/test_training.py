@@ -276,20 +276,6 @@ def test_temperature_moves_anneal_then_argmax_is_key_independent() -> None:
     assert eqx.tree_equal(state_a, state_b) is True
 
 
-def test_persistent_counter_survives_carry_round_trip() -> None:
-    # The anneal counter is the per-lane recorded-move count, `len(pending[lane])`
-    # -- no new carry field, since `pending_len` already is that count (it resets
-    # to 0 when a lane's game flushes, and only undercounts once a lane is
-    # trimmed past `max_game_len`, at which point the count is already far past
-    # any sane `temperature_moves`). A round trip must preserve it exactly.
-    carry = _mid_game_carry()
-    counts = [len(lane) for lane in carry.pending]
-    padded = to_padded(carry, max_game_len=800)
-    assert padded.pending_len.tolist() == counts
-    restored = from_padded(padded, track_ordering=False)
-    assert [len(lane) for lane in restored.pending] == counts
-
-
 def test_persistent_carry_two_calls_equal_one_long_call() -> None:
     # The carry's defining property: collection is a continuous stream cut at
     # sample counts, not restarted per call. Two carried calls of N must produce
@@ -412,8 +398,15 @@ def _carry_rows(carry: SelfPlayCarry) -> list[list[tuple[Any, ...]]]:
 def test_carry_padded_round_trip_is_exact() -> None:
     # The checkpointable form must be lossless: the pending buffers, the RNG key,
     # the (possibly negative) surplus and the recorded-field spec all survive.
+    # `pending_len` in particular carries the anneal counter (the per-lane
+    # recorded-move count, `len(pending[lane])`) -- no new carry field exists for
+    # it, since `pending_len` already is that count -- so its round trip is
+    # asserted directly here rather than in a separate test.
     carry = _mid_game_carry()
-    back = from_padded(to_padded(carry, max_game_len=800), track_ordering=False)
+    counts = [len(lane) for lane in carry.pending]
+    padded = to_padded(carry, max_game_len=800)
+    assert padded.pending_len.tolist() == counts
+    back = from_padded(padded, track_ordering=False)
     assert _carry_rows(back) == _carry_rows(carry)
     assert np.array_equal(
         np.asarray(jax.random.key_data(back.key)),
@@ -476,7 +469,7 @@ def test_runstate_serialise_roundtrip_is_bit_exact(tmp_path: Path) -> None:
 
     backends: list[tuple[str, Backend]] = [
         ("mlp", MLPBackend((16,))),
-        ("gnn", GNNBackend(PRESETS["gn_global"]._replace(width=16, layers=2))),
+        ("gnn", GNNBackend(PRESETS["gn_global"]._replace(width=8, layers=1))),
     ]
     for name, backend in backends:
         net = backend.init(jax.random.key(0))
@@ -584,15 +577,24 @@ def _learn_cfg(
     n_iterations: int,
     *,
     seed: int = 7,
-    train_steps: int = 3,
+    train_steps: int = 2,
+    num_simulations: int = 1,
     value_blend: ValueBlendConfig | None = None,
     selfplay: SelfPlayConfig | None = None,
 ) -> LearnConfig:
     """Tiny, arena-free LearnConfig -- the resume property holds regardless of
-    arena, so we skip it (games=0) to keep the run seconds-fast."""
+    arena, so we skip it (games=0) to keep the run seconds-fast. Defaults to a
+    single simulation, exercising the real tree-search jit (not the
+    ``num_simulations=0`` lookahead special case) -- resume correctness does
+    not depend on search *depth*, but it does depend on running the real
+    search at least once per backend (the two headline bit-exact tests).
+    Callers whose own assertions don't depend on how many env steps a game
+    takes to finish (checked per call site, since ``lookahead`` self-plays
+    measurably differently, not just faster) may pass ``num_simulations=0``
+    for the 3-4x cheaper trace."""
     return LearnConfig(
         n_iterations=n_iterations, seed=seed,
-        search=SearchSettings(num_simulations=2, max_considered=4),
+        search=SearchSettings(num_simulations=num_simulations, max_considered=4),
         selfplay=selfplay or SelfPlayConfig(samples=8, batch=4),
         optim=OptimConfig(batch_size=4, train_steps=train_steps),
         replay=ReplayConfig(buffer_min=4),
@@ -612,6 +614,9 @@ def test_learn_resume_bit_exact_persistent(tmp_path: Path) -> None:
     # The headline durability property with the carry threaded: a straight
     # 6-iteration persistent run must equal a 2-iteration checkpoint + resume,
     # leaf-for-leaf. Only a bit-exact carry in the checkpoint can do that.
+    # n_iterations is not free to shrink here: at this seed/config a game
+    # finishes (produces samples) only on iteration 6 exactly -- fewer
+    # iterations make the "real samples trained" assertion below vacuous.
     seen: list[float] = []
 
     def cfg(n: int) -> LearnConfig:
@@ -631,17 +636,27 @@ def test_learn_persistent_zero_sample_iteration_checkpoints(tmp_path: Path) -> N
     # an earlier overshoot already covers the request, so the call takes no env
     # step at all. It must still count and checkpoint (a `continue` here would
     # wedge the run at the last data-producing iteration's checkpoint).
+    # num_simulations=0: verified this seed's zero-sample-then-flush pattern
+    # (samples[0] > 0, samples[-1] == 0) holds unchanged under lookahead too, at
+    # 3-4x less trace cost -- unlike the persistent test above, no per-iteration
+    # `max_steps` cutoff makes the *which* iteration flushes sensitive to the
+    # acting policy here (self_play just runs until the sample target is met).
     samples: list[float] = []
-    cfg = _learn_cfg(3, selfplay=SelfPlayConfig(samples=8, batch=4, persistent=True))
+    cfg = _learn_cfg(
+        3, num_simulations=0,
+        selfplay=SelfPlayConfig(samples=8, batch=4, persistent=True),
+    )  # fmt: skip
     learn(
         MLPBackend((16,)), cfg, checkpoint_dir=tmp_path,
         on_iter=lambda i, m, n: samples.append(m["samples"]),
     )  # fmt: skip
     assert samples[0] > 0 and samples[-1] == 0  # the first flush overshoots by a lot
     assert len(samples) == 3  # every iteration reported, zero-sample ones included
-    straight = learn(MLPBackend((16,)), _learn_cfg(4, selfplay=cfg.selfplay))
+    straight = learn(
+        MLPBackend((16,)), _learn_cfg(4, num_simulations=0, selfplay=cfg.selfplay)
+    )
     resumed = learn(
-        MLPBackend((16,)), _learn_cfg(4, selfplay=cfg.selfplay),
+        MLPBackend((16,)), _learn_cfg(4, num_simulations=0, selfplay=cfg.selfplay),
         resume_from=tmp_path / "runstate.eqx",
     )  # fmt: skip
     _assert_nets_bit_exact(straight, resumed)  # the 3rd iteration did checkpoint
@@ -653,12 +668,17 @@ def test_learn_skips_the_pool_when_resuming_without_persistence(
     # Flipping `persistent` OFF across a resume: the run never reads the pool, so
     # the checkpoint's (much larger, differently-shaped) carry section is skipped
     # rather than shape-checked. Resuming at the checkpoint's own iteration count
-    # runs nothing, so the returned net must be the checkpointed one verbatim.
+    # runs nothing, so the returned net must be the checkpointed one verbatim --
+    # no sample-count threshold at stake, so `num_simulations=0` is safe.
     backend = MLPBackend((16,))
     trained = learn(
-        backend, _learn_cfg(1, selfplay=_PERSISTENT), checkpoint_dir=tmp_path
-    )
-    resumed = learn(backend, _learn_cfg(1), resume_from=tmp_path / "runstate.eqx")
+        backend, _learn_cfg(1, num_simulations=0, selfplay=_PERSISTENT),
+        checkpoint_dir=tmp_path,
+    )  # fmt: skip
+    resumed = learn(
+        backend, _learn_cfg(1, num_simulations=0),
+        resume_from=tmp_path / "runstate.eqx",
+    )  # fmt: skip
     _assert_nets_bit_exact(trained, resumed)
 
 
@@ -667,12 +687,13 @@ def test_learn_rejects_resuming_a_pool_less_checkpoint_as_persistent(
 ) -> None:
     # Flipping `persistent` ON across a resume: the checkpoint holds no pool to
     # continue, and its zero-row pad cannot fit the padded template. That must
-    # name the knob, not surface a raw eqx shape error.
+    # name the knob, not surface a raw eqx shape error. The raise fires before
+    # any self-play, so `num_simulations=0` is safe.
     backend = MLPBackend((16,))
-    learn(backend, _learn_cfg(1), checkpoint_dir=tmp_path)
+    learn(backend, _learn_cfg(1, num_simulations=0), checkpoint_dir=tmp_path)
     with pytest.raises(ValueError, match=r"selfplay\.persistent"):
         learn(
-            backend, _learn_cfg(2, selfplay=_PERSISTENT),
+            backend, _learn_cfg(2, num_simulations=0, selfplay=_PERSISTENT),
             resume_from=tmp_path / "runstate.eqx",
         )  # fmt: skip
 
@@ -680,36 +701,43 @@ def test_learn_rejects_resuming_a_pool_less_checkpoint_as_persistent(
 def test_learn_resumes_from_a_pre_carry_checkpoint(tmp_path: Path) -> None:
     # `RunState` grew `selfplay_carry` (last field, so the carry is the file's
     # trailing section): a checkpoint written before the change -- this one with
-    # that section stripped -- must still load and resume.
+    # that section stripped -- must still load and resume. No sample-count
+    # threshold is at stake (unlike the persistent test above), so
+    # `num_simulations=0` is safe here for the cheaper trace.
     backend = MLPBackend((16,))
-    learn(backend, _learn_cfg(1), checkpoint_dir=tmp_path)
+    cfg1 = _learn_cfg(1, num_simulations=0)
+    cfg3 = _learn_cfg(3, num_simulations=0)
+    learn(backend, cfg1, checkpoint_dir=tmp_path)
     ck = tmp_path / "runstate.eqx"
     buf = io.BytesIO()
-    eqx.tree_serialise_leaves(buf, carry_template(backend, _learn_cfg(1)))
+    eqx.tree_serialise_leaves(buf, carry_template(backend, cfg1))
     ck.write_bytes(ck.read_bytes()[: -len(buf.getvalue())])
-    straight = learn(backend, _learn_cfg(3))
-    resumed = learn(backend, _learn_cfg(3), resume_from=ck)
+    straight = learn(backend, cfg3)
+    resumed = learn(backend, cfg3, resume_from=ck)
     _assert_nets_bit_exact(straight, resumed)
 
 
 def test_learn_resume_bit_exact_mlp(tmp_path: Path) -> None:
-    # Headline durability: a straight 3-iteration run must equal a 1-iter
-    # checkpoint + resume to 3, leaf-for-leaf. Resume RNG is seed+iter, so the
+    # Headline durability: a straight 2-iteration run must equal a 1-iter
+    # checkpoint + resume to 2, leaf-for-leaf. Resume RNG is seed+iter, so the
     # split run must reproduce the contiguous one bit-for-bit.
-    straight = learn(MLPBackend((16,)), _learn_cfg(3))
+    straight = learn(MLPBackend((16,)), _learn_cfg(2))
     learn(MLPBackend((16,)), _learn_cfg(1), checkpoint_dir=tmp_path)
     resumed = learn(
-        MLPBackend((16,)), _learn_cfg(3), resume_from=tmp_path / "runstate.eqx"
+        MLPBackend((16,)), _learn_cfg(2), resume_from=tmp_path / "runstate.eqx"
     )
     _assert_nets_bit_exact(straight, resumed)
 
 
 def test_learn_resume_bit_exact_gnn(tmp_path: Path) -> None:
-    cfg = PRESETS["gn_global"]._replace(width=16, layers=2, head_depth=1)
-    straight = learn(GNNBackend(cfg), _learn_cfg(3))
+    # Resume is a loop/serialization property, not an architecture one, so the
+    # smallest net that still runs the GNN backend's own code path (distinct
+    # from the mlp test above) suffices.
+    cfg = PRESETS["gn_global"]._replace(width=8, layers=1, head_depth=1)
+    straight = learn(GNNBackend(cfg), _learn_cfg(2))
     learn(GNNBackend(cfg), _learn_cfg(1), checkpoint_dir=tmp_path)
     resumed = learn(
-        GNNBackend(cfg), _learn_cfg(3), resume_from=tmp_path / "runstate.eqx"
+        GNNBackend(cfg), _learn_cfg(2), resume_from=tmp_path / "runstate.eqx"
     )
     _assert_nets_bit_exact(straight, resumed)
 
@@ -887,7 +915,8 @@ def test_periodic_eval_emits_val_metrics() -> None:
 
     cfg = LearnConfig(
         n_iterations=2, seed=5,
-        search=SearchSettings(num_simulations=2, max_considered=4),
+        # num_simulations=0: eval-scheduling doesn't depend on search depth.
+        search=SearchSettings(num_simulations=0, max_considered=4),
         selfplay=SelfPlayConfig(samples=8, batch=4),
         optim=OptimConfig(batch_size=4, train_steps=2),
         replay=ReplayConfig(buffer_min=4),
@@ -1018,7 +1047,7 @@ def _bench_cfg() -> LearnConfig:
     """The smallest config that still runs the real net search (bench wiring)."""
     return LearnConfig(
         n_iterations=1, seed=0,
-        search=SearchSettings(num_simulations=2, max_considered=4),
+        search=SearchSettings(num_simulations=1, max_considered=4),
         selfplay=SelfPlayConfig(samples=4, batch=2),
         arena=ArenaConfig(games=0),
     )  # fmt: skip
@@ -1033,7 +1062,7 @@ def test_bench_selfplay_reports_throughput() -> None:
         "env_steps", "discarded", "t_median_s", "t_0", "t_1",
     }  # fmt: skip
     assert out["samples_per_s"] > 0.0 and out["samples"] > 0.0
-    assert out["sims_per_s"] == out["moves_per_s"] * 2  # num_simulations
+    assert out["sims_per_s"] == out["moves_per_s"] * 1  # num_simulations
 
 
 def test_bench_selfplay_persistent_threads_carry() -> None:

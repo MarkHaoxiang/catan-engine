@@ -17,6 +17,11 @@ install_import_hook(
 if "JAX_PLATFORMS" not in os.environ and "PYTEST_XDIST_WORKER" in os.environ:
     jax.config.update("jax_platforms", "cpu")  # type: ignore[no-untyped-call]
 
+# Persist XLA compilations across test runs (~/.cache/jax-settlrl unless
+# JAX_COMPILATION_CACHE_DIR overrides; shared with the engine/experiments
+# suites on purpose -- same cache dir, same tiny programs). The resume/carry
+# tests each run a miniature training loop, so a warm cache turns their
+# repeated `learn`/`self_play` traces into cache hits.
 if "JAX_COMPILATION_CACHE_DIR" not in os.environ:
     jax.config.update(  # type: ignore[no-untyped-call]
         "jax_compilation_cache_dir", str(pathlib.Path.home() / ".cache/jax-settlrl")
