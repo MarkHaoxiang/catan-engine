@@ -496,6 +496,45 @@ def test_runstate_serialise_roundtrip_is_bit_exact(tmp_path: Path) -> None:
         assert int(back.iteration) == 3 and float(back.best) == float(jnp.float32(0.4))
 
 
+def test_save_run_state_leaves_no_tmp_and_loads_back_whole(tmp_path: Path) -> None:
+    # Happy path for the atomic write: no leftover `.tmp`, and the file the
+    # rename leaves behind loads back completely.
+    import optax
+
+    backend = MLPBackend((16,))
+    net = backend.init(jax.random.key(0))
+    state = RunState(
+        net, backend.init_opt(optax.adamw(1e-3), net), {}, jnp.int32(3),
+        jnp.float32(0.4), carry_template(backend, _learn_cfg(1)),
+    )  # fmt: skip
+    path = tmp_path / "runstate.eqx"
+    save_run_state(path, state)
+    assert path.exists()
+    assert not (tmp_path / "runstate.eqx.tmp").exists()
+    back = load_run_state(path, state)
+    assert int(back.iteration) == 3 and float(back.best) == float(jnp.float32(0.4))
+
+
+def test_save_run_state_overwrites_a_stale_tmp(tmp_path: Path) -> None:
+    # A `.tmp` left behind by a prior kill mid-write must not be mistaken for
+    # a real checkpoint, and must not block the next write.
+    import optax
+
+    backend = MLPBackend((16,))
+    net = backend.init(jax.random.key(0))
+    state = RunState(
+        net, backend.init_opt(optax.adamw(1e-3), net), {}, jnp.int32(3),
+        jnp.float32(0.4), carry_template(backend, _learn_cfg(1)),
+    )  # fmt: skip
+    path = tmp_path / "runstate.eqx"
+    stale = tmp_path / "runstate.eqx.tmp"
+    stale.write_bytes(b"truncated by a prior kill")
+    save_run_state(path, state)
+    assert not stale.exists()
+    back = load_run_state(path, state)
+    assert int(back.iteration) == 3
+
+
 def test_runstate_carries_the_live_pool_through_eqx(tmp_path: Path) -> None:
     # The carry survives the *file*, not just the in-memory conversion pair: it
     # is deserialised into the zero template a fresh run builds.
@@ -1032,6 +1071,18 @@ def test_bench_selfplay_rejects_playout_cap() -> None:
     )
     with pytest.raises(ValueError, match="pcr_full_prob"):
         bench_selfplay(backend, backend.init(jax.random.key(0)), cfg)
+
+
+def test_bench_selfplay_rejects_persistent_without_warmup() -> None:
+    # warmup=0 under persistent would put pool creation + the XLA compile
+    # inside the first timed repeat, silently corrupting the headline number.
+    backend = MLPBackend((16,))
+    cfg = _bench_cfg()
+    cfg = cfg.model_copy(
+        update={"selfplay": cfg.selfplay.model_copy(update={"persistent": True})}
+    )
+    with pytest.raises(ValueError, match="warmup"):
+        bench_selfplay(backend, backend.init(jax.random.key(0)), cfg, warmup=0)
 
 
 def test_mlp_loss_masks_policy_by_train_policy() -> None:

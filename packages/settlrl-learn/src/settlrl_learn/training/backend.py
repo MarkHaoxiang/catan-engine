@@ -17,6 +17,7 @@ A training-side module: not imported by the package root.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, cast
@@ -113,7 +114,16 @@ _PRE_CARRY_FIELDS = RunState._fields.index("selfplay_carry")
 
 
 def save_run_state(path: str | Path, state: RunState) -> None:
-    eqx.tree_serialise_leaves(Path(path), state)
+    """Serialises ``state`` to ``path`` atomically: writes to a sibling
+    ``<path>.tmp`` first, then ``os.replace``s it into place (same filesystem).
+    The validated operating procedure for a long run is kill-and-resume, and a
+    multi-GiB in-place write killed mid-flight would otherwise truncate the
+    only checkpoint; a stale ``.tmp`` from an earlier kill is silently
+    overwritten by the next successful write."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    eqx.tree_serialise_leaves(tmp, state)
+    os.replace(tmp, path)
 
 
 def load_run_state(path: str | Path, template: RunState) -> RunState:

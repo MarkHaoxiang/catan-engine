@@ -74,7 +74,11 @@ def bench_selfplay(
     Raises ``ValueError`` under playout-cap randomization
     (``cfg.selfplay.pcr_full_prob`` < 1): the sims-per-move accounting assumes
     every step ran the full search. Raises ``ValueError`` if ``repeats`` < 1
-    (the median over zero timed repeats is undefined)."""
+    (the median over zero timed repeats is undefined), or if
+    ``cfg.selfplay.persistent`` and ``warmup`` < 1 (persistent bench needs the
+    warmup call to create the carry; without it, the first *timed* repeat pays
+    pool creation and the XLA compile alongside the flush it's meant to
+    measure)."""
     if cfg.selfplay.pcr_full_prob < 1.0:
         raise ValueError(
             "bench_selfplay needs pcr_full_prob == 1.0 (playout-cap randomization "
@@ -82,6 +86,12 @@ def bench_selfplay(
         )
     if repeats < 1:
         raise ValueError(f"bench_selfplay needs repeats >= 1; got {repeats}")
+    if cfg.selfplay.persistent and warmup < 1:
+        raise ValueError(
+            "bench_selfplay needs warmup >= 1 under selfplay.persistent (the "
+            "warmup call creates the carry -- pool ramp-up and the XLA compile "
+            f"-- so a timed repeat measures steady-state flush only); got warmup={warmup}"
+        )
     calls = selfplay_callables(backend, cfg, net)
     net_search = calls.make_net_search(cfg.search.num_simulations)
     search = functools.partial(net_search, eqx.partition(net, eqx.is_array)[0])

@@ -116,8 +116,16 @@ deps only because this subpackage uses them.
     once a persistent run is under way (every checkpoint then pads the live
     carry), so steady-state host RAM is the live pool alone (~0.6 GiB at those
     shapes). A non-persistent run pads to zero rows and pays 266 KiB (the env
-    arrays). If that write cost ever bites, the lever is a separate pad bound
-    below `max_game_len`, not the fixed shape.
+    arrays). The adopted `scale2` preset (throughput wave, 2026-07-28) runs
+    B=512 — pad is linear in `selfplay.batch`, so **~3.6 GiB** — with a
+    measured write of ~1 s in the validation run: acceptable, and this
+    supersedes the original plan's 3 GB pad tripwire
+    (`docs/superpowers/plans/2026-07-28-throughput-wave-1.md`). If that write
+    cost ever bites, the lever is a separate pad bound below `max_game_len`,
+    not the fixed shape. `save_run_state` writes to a sibling `.tmp` and
+    `os.replace`s it into place, so the write is atomic — a kill mid-write
+    (the validated operating procedure for a long run) leaves the previous
+    checkpoint intact instead of truncating the only one.
   - `training/selfplay.py::self_play` — batched n-player self-play, the search
     (net's or a fixed teacher's) guiding the re-determinizing moves and improved
     policy. The backend's `observe` records the *true* board (net learns the

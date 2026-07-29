@@ -53,6 +53,7 @@ from settlrl_learn.training.selfplay import (
     SelfPlayStats,
     empty_padded,
     from_padded,
+    recorded_spec,
     self_play,
     to_padded,
 )
@@ -169,14 +170,8 @@ def carry_template(backend: Backend, cfg: LearnConfig) -> PaddedCarry:
     layout, state = make_board(batch_size=1, seed=0, n_players=_SELFPLAY_N_PLAYERS)
     one = jax.tree.map(lambda x: x[0], (layout, state))
     obs = jax.eval_shape(backend.observe, one[0], one[1], jnp.int32(0))
-    spec: dict[str, tuple[tuple[int, ...], np.dtype[Any]]] = {
-        k: (v.shape, np.dtype(v.dtype)) for k, v in obs.items()
-    }
-    spec["policy"] = ((N_FLAT,), np.dtype(np.float32))
-    spec["mask"] = ((N_FLAT,), np.dtype(np.bool_))
-    spec["train_policy"] = ((), np.dtype(np.float32))
-    if cfg.value_blend.max > 0:
-        spec["q"] = ((), np.dtype(np.float32))
+    obs_spec = {k: (tuple(v.shape), np.dtype(v.dtype)) for k, v in obs.items()}
+    spec = recorded_spec(obs_spec, n_flat=N_FLAT, record_value=cfg.value_blend.max > 0)
     return empty_padded(
         batch_size=cfg.selfplay.batch,
         n_players=_SELFPLAY_N_PLAYERS,
@@ -415,7 +410,12 @@ def learn(
                     net, opt_state, buf_state, jnp.int32(i + 1), jnp.float32(best), pool
                 ),
             )
-            del pool  # the next write allocates its own pad
+            # Persistent: `pool` is a fresh `to_padded` copy built just above,
+            # so this frees it (the next checkpoint pads the live carry again).
+            # Non-persistent: `pool` merely aliases the reused `zero_carry`
+            # template, which the name `zero_carry` keeps alive for the next
+            # checkpoint -- `del` here only drops this local binding.
+            del pool
         if bar is not None:
             bar.set_postfix(
                 {

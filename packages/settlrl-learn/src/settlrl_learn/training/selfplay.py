@@ -95,6 +95,28 @@ _DERIVED_KEYS = ("policy", "mask", "train_policy", "q")
 """The recorded keys that are not part of the backend's observation."""
 
 
+def recorded_spec(
+    obs_spec: dict[str, tuple[tuple[int, ...], np.dtype[Any]]],
+    *,
+    n_flat: int,
+    record_value: bool,
+) -> dict[str, tuple[tuple[int, ...], np.dtype[Any]]]:
+    """``obs_spec`` (the backend's per-key trailing shape+dtype) plus the
+    derived keys self-play records over it -- the single source of truth for
+    :data:`_DERIVED_KEYS`, so a call-site's spec and the padding code's notion
+    of "derived" cannot drift apart. ``q`` is included only when
+    ``record_value``."""
+    spec = {**obs_spec}
+    f32 = np.dtype(np.float32)
+    spec["policy"] = ((n_flat,), f32)
+    spec["mask"] = ((n_flat,), np.dtype(np.bool_))
+    spec["train_policy"] = ((), f32)
+    if record_value:
+        spec["q"] = ((), f32)
+    assert set(spec) - set(obs_spec) <= set(_DERIVED_KEYS)
+    return spec
+
+
 class PaddedEnv(NamedTuple):
     """:class:`BatchedSettlrlEnv`'s complete array state, PRNG keys as raw uint32
     (eqx cannot serialise typed key arrays).
@@ -449,7 +471,9 @@ def self_play(
             # moves. `len(pending[lane])` is the recorded-move count so far this
             # game (see the docstring); no extra RNG draw either way.
             counts = jnp.asarray([len(pending[lane]) for lane in range(batch_size)])
-            argmax_move = jnp.argmax(jnp.where(mask, weights, -jnp.inf), axis=-1)
+            # `_sample_moves` at temperature 0 is the masked argmax; it never
+            # reads `key` on that path, so reusing `k_move` draws no extra RNG.
+            argmax_move = _sample_moves(k_move, weights, mask, 0.0)
             move = jnp.where(counts < temperature_moves, move, argmax_move)
         # Setup-phase lanes play (unrecorded) via the fixed setup policy.
         is_setup = (
@@ -466,14 +490,15 @@ def self_play(
         obs = {k: np.asarray(v) for k, v in observe_of(layout, state, sel).items()}
         w_np, sel_np, m_np = np.asarray(weights), np.asarray(sel), np.asarray(mask)
         if not spec:  # capture the per-key trailing shape+dtype once (empty case)
-            f32 = np.dtype(np.float32)
-            spec = {k: (v.shape[1:], v.dtype) for k, v in obs.items()}
-            spec["policy"] = (w_np.shape[1:], w_np.dtype)
-            spec["mask"] = (m_np.shape[1:], m_np.dtype)
-            spec["train_policy"] = ((), f32)
-            if record_value:
-                spec["q"] = ((), f32)
-            out = {k: [] for k in (*spec,)}
+            assert not set(obs) & set(_DERIVED_KEYS), (
+                "backend.observe() key collides with a derived key: "
+                f"{set(obs) & set(_DERIVED_KEYS)}"
+            )
+            obs_spec = {k: (v.shape[1:], v.dtype) for k, v in obs.items()}
+            spec = recorded_spec(
+                obs_spec, n_flat=w_np.shape[-1], record_value=record_value
+            )
+            out = {k: [] for k in spec}
         tp_val = 1.0 if full else 0.0  # 1 = full-search position (trains policy)
         for lane in range(batch_size):
             if is_setup[lane]:  # the net does not train on setup positions
