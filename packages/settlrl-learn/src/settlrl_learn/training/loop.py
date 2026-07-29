@@ -112,10 +112,11 @@ def selfplay_callables(
     arg. Shared by :func:`learn` and
     :func:`~settlrl_learn.training.bench.bench_selfplay`.
 
-    Memoised on ``(backend, the search-affecting config, the net's static)``, so
-    a second call -- a second :func:`learn` in one process -- reuses the same
-    jitted objects instead of re-tracing them. The net's arrays are a traced
-    argument and never enter the key."""
+    Memoised on ``(backend, the search-affecting config)``, so a second call --
+    a second :func:`learn` in one process -- reuses the same jitted objects
+    instead of re-tracing them. The net's static guards that single entry (a
+    mismatch rebuilds and overwrites it); its arrays are a traced argument and
+    never enter the key."""
     key = (id(backend), _callables_key(cfg))
     net_static = eqx.partition(net, eqx.is_array)[1]
     hit = _CALLABLES_CACHE.get(key)

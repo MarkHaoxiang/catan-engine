@@ -7,10 +7,10 @@ per concluded variant. Don't scaffold a new number for a question an
 existing framework can express as a config — extend its `VARIANTS` instead;
 git history is the framework's changelog, the report its conclusions.
 
-## Shared harness — `settlrl_agents.experiment`
+## Shared harness — `settlrl_learn.experiment`
 
 No shared libraries live under `experiments/` (only per-framework scripts +
-`new.py`). The reusable harness is the `settlrl_agents.experiment` subpackage:
+`new.py`). The reusable harness is the `settlrl_learn.experiment` subpackage:
 
 - `start_run` (run dir + manifest pinning git commit / uncommitted-diff digest
   / merged config / environment; repo root derived from the framework dir it's
@@ -33,7 +33,7 @@ No shared libraries live under `experiments/` (only per-framework scripts +
     `start_run` keeps owning the run dir + manifest. `run.compose_config(overrides)`
     is the programmatic seam (smoke tests) that `@hydra.main` can't serve.
 
-The subpackage is not imported by the agents runtime, so `import settlrl_agents`
+The harness lives in `settlrl-learn`, not `settlrl-agents`, so `import settlrl_agents`
 does not pull `pydantic`/`omegaconf`. A framework's *same-dir* helpers (e.g.
 `value_fitting`, `data`, `models`) still live beside its `run.py`.
 

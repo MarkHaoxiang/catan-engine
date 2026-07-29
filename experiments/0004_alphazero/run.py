@@ -166,7 +166,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         reinit=True, dir=str(run.dir), id=wandb_id,
         resume="allow" if wandb_id else None,
     )  # fmt: skip
-    (run.dir / "wandb_id.txt").write_text(str(wb.id))  # so a later run can resume it
+    if wb.id:  # None under mode="disabled" -- don't write the literal "None"
+        (run.dir / "wandb_id.txt").write_text(wb.id)  # so a later run can resume it
     best = -1.0
 
     def on_iter(i: int, metrics: dict[str, float], model: BoardGNN) -> None:
@@ -243,7 +244,8 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         id=wandb_id,
         resume="allow" if wandb_id else None,
     )
-    (run.dir / "wandb_id.txt").write_text(str(wb.id))  # so a later run can resume it
+    if wb.id:  # None under mode="disabled" -- don't write the literal "None"
+        (run.dir / "wandb_id.txt").write_text(wb.id)  # so a later run can resume it
 
     best = -1.0  # best arena win rate seen -> best.npz (the shippable net)
 

@@ -108,7 +108,7 @@ uses them.
     checked by `from_padded`.
     Checkpoint size: the pad is fixed-shape, so a *persistent* run pays it in
     full at every write — **1.82 GiB** at B=256 / `max_game_len` 800 / GNN obs +
-    662-wide policy, ~0.5 s to build and write (measured 2026-07-28, independent
+    662-wide policy, ~0.5 s to build and ~0.5 s to write (measured 2026-07-28, independent
     of pool fullness). Transient: the loop frees each `to_padded` result after
     writing and drops the zero template once persistent, so steady-state host
     RAM is just the live pool (~0.6 GiB at those shapes); non-persistent pads to
@@ -213,8 +213,9 @@ uses them.
     jitted+vmapped self-play callables (`view_of` / `observe_of` / `setup_search`
     + a `make_net_search(num_simulations)` factory closing over the net's *static*
     part); `learn` and `bench_selfplay` share it so the wiring cannot drift. It is
-    **memoised** (`loop._CALLABLES_CACHE`, keyed on the backend's identity, the
-    whole search config + the value-blend factory choice, and the net's static):
+    **memoised** (`loop._CALLABLES_CACHE`, keyed on the backend's identity and the
+    whole search config + the value-blend factory choice, guarded by the net's
+    static -- a mismatch on the single per-key entry rebuilds and overwrites it):
     a fresh closure is a jit cache miss, so an uncached second `learn` in one
     process re-traced every self-play jit — a measured ~68 s startup spike at
     scale (8.49 s → 1.54 s per warm `learn`, even on the tiny test config,
