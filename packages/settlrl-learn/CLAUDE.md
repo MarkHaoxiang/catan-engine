@@ -164,7 +164,7 @@ deps only because this subpackage uses them.
     request (a finished game flushes whole, so a call overshoots); crediting it
     to the next call is what makes a sequence of persistent calls of `n` produce
     *exactly* what one call of their total would, positions and RNG stream
-    included (asserted in `tests/test_training.py`) — provided no call exhausts
+    included (asserted in `tests/test_selfplay.py`) — provided no call exhausts
     its own `max_steps`, which is a per-call budget. A resumed call whose request
     the surplus already covers takes **zero** env steps and returns empty arrays
     built from `spec` — hence the carried dtypes, since `mask` is bool and a
@@ -174,7 +174,14 @@ deps only because this subpackage uses them.
     captured pre-change guards the RNG stream and recording order). The cost:
     a persistent call's output is pure in (`seed`, carried state) rather than in
     `seed` alone — `seed` seeds only the first call — which is why the carry
-    reaches the checkpoint (`to_padded` / `from_padded`, beside the carry).
+    reaches the checkpoint (`training/carry.py`, below).
+  - `training/carry.py` — the pool types and the projection that checkpoints
+    them: `SelfPlayCarry` (live, above), `PaddedCarry`/`PaddedEnv`, the
+    `to_padded`/`from_padded` pair and the `empty_padded`/`carry_template` zero
+    template, plus `recorded_spec` (the single source of truth for the derived
+    recorded keys, so a call site's spec and the padding code's notion of
+    "derived" cannot drift) and `make_env` — self-play's *only* env construction
+    site, since a carried pool is restorable only into an identically-built env.
     The padded form is fixed-shape because that is what an eqx deserialisation
     template is: every recorded key pads to `(batch, max_game_len, …)` in host
     numpy with a per-lane `pending_len`, and the env — a held *object*, not a
@@ -216,6 +223,18 @@ deps only because this subpackage uses them.
     jitted+vmapped self-play callables (`view_of` / `observe_of` / `setup_search`
     + a `make_net_search(num_simulations)` factory closing over the net's *static*
     part); `learn` and `bench_selfplay` share it so the wiring cannot drift.
+    It is **memoised** (`loop._CALLABLES_CACHE`, keyed on the backend's identity,
+    the whole search config + the value-blend factory choice, and the net's
+    static): a fresh closure is a jit cache miss, so an uncached second `learn`
+    in one process re-traced every self-play jit — a measured ~68 s startup spike
+    at scale, and the floor under the test suite's repeated miniature runs.
+    Reuse is semantically free (the callables are pure in that key; the net's
+    arrays are a traced argument, never closed over) and the bit-exact resume
+    tests gate it. The key deliberately omits `selfplay.batch` and the seat count
+    — those ride the traced arguments' shapes, which jax keys its own cache on —
+    and the setup knobs, which live on the backend. Two nets of one architecture
+    have equal statics (verified on a hit rather than assumed, so a
+    differently-shaped net rebuilds instead of silently reusing).
   - `training/arena.py::arena` — the net's `ArenaResult(wins, episodes)` vs. a
     `POLICIES` opponent, seat-swapped at 2p (`lookahead` = the Stage-1 gate;
     `random` = the lower-bound sanity check); the play agent comes from

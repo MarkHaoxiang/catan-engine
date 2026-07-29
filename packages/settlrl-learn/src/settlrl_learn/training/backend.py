@@ -107,7 +107,7 @@ class RunState(NamedTuple):
     buffer_state: Any  # flashbax buffer state pytree
     iteration: Int[Array, ""]  # iterations completed
     best: Float[Array, ""]  # best arena win rate so far
-    selfplay_carry: Any  # settlrl_learn.training.selfplay.PaddedCarry
+    selfplay_carry: Any  # settlrl_learn.training.carry.PaddedCarry
 
 
 _PRE_CARRY_FIELDS = RunState._fields.index("selfplay_carry")

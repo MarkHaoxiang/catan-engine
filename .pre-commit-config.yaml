@@ -21,7 +21,7 @@ repos:
         files: ^packages/settlrl-engine/(tools/gen_stack_bound_doc\.py|docs/longest-road-stack-bound\.html)$
       - id: mypy
         name: mypy
-        entry: uv run mypy packages/settlrl-engine/src packages/settlrl-engine/tests packages/settlrl-agents/src packages/settlrl-agents/tests packages/settlrl-app/src packages/settlrl-game/src packages/settlrl-learn/src packages/settlrl-learn/tests/test_learn.py packages/settlrl-learn/tests/test_architectures.py packages/settlrl-learn/tests/test_training.py packages/settlrl-learn/tests/test_elo.py packages/settlrl-learn/tests/benchmark/test_training_benchmark.py
+        entry: uv run mypy packages/settlrl-engine/src packages/settlrl-engine/tests packages/settlrl-agents/src packages/settlrl-agents/tests packages/settlrl-app/src packages/settlrl-game/src packages/settlrl-learn/src packages/settlrl-learn/tests/test_learn.py packages/settlrl-learn/tests/test_architectures.py packages/settlrl-learn/tests/test_training.py packages/settlrl-learn/tests/test_selfplay.py packages/settlrl-learn/tests/test_carry.py packages/settlrl-learn/tests/test_arena_elo.py packages/settlrl-learn/tests/test_bench.py packages/settlrl-learn/tests/test_elo.py packages/settlrl-learn/tests/benchmark/test_training_benchmark.py
         language: system
         pass_filenames: false
         always_run: true

@@ -27,11 +27,8 @@ import equinox as eqx
 import flashbax as fbx
 import jax
 import jax.numpy as jnp
-import numpy as np
 from settlrl_agents.value import ValueFunction
 from settlrl_engine.belief import belief_view
-from settlrl_engine.board import make_board
-from settlrl_engine.env import N_FLAT
 from settlrl_search import (
     PolicyWeights,
     PolicyWeightsValue,
@@ -46,18 +43,15 @@ from settlrl_learn.training.backend import (
     load_run_state,
     save_run_state,
 )
-from settlrl_learn.training.config import LearnConfig
-from settlrl_learn.training.selfplay import (
+from settlrl_learn.training.carry import (
     PaddedCarry,
-    Samples,
     SelfPlayCarry,
-    SelfPlayStats,
-    empty_padded,
+    carry_template,
     from_padded,
-    recorded_spec,
-    self_play,
     to_padded,
 )
+from settlrl_learn.training.config import LearnConfig
+from settlrl_learn.training.selfplay import Samples, SelfPlayStats, self_play
 from settlrl_learn.training.steps import (
     evaluate,
     make_optimizer,
@@ -93,13 +87,52 @@ def _weights_factory(cfg: LearnConfig) -> tuple[Any, dict[str, Any]]:
     }  # fmt: skip
 
 
+def _callables_key(cfg: LearnConfig) -> tuple[str, bool]:
+    """Everything :func:`selfplay_callables` bakes into its traced program: the
+    whole search config (all of it reaches the search factory) and whether value
+    blending selects the root-value-returning one. Batch and seat counts are not
+    in it -- they ride the traced arguments' shapes, which jax keys its own
+    compilation cache on -- and neither are the setup knobs, which live on the
+    backend (keyed by identity)."""
+    return cfg.search.model_dump_json(), cfg.value_blend.max > 0
+
+
+_CALLABLES_CACHE: dict[
+    tuple[int, tuple[str, bool]], tuple[Any, Any, SelfPlayCallables]
+] = {}
+"""``(id(backend), config key) -> (backend, net static, callables)``. The backend
+rides in the *value* so the cache holds it alive -- its ``id`` cannot then be
+recycled by a later object while the entry exists. The static rides along so a
+hit *checks* the same-architecture assumption instead of assuming it (two nets of
+one architecture have equal statics; a differently-shaped net rebuilds). Unbounded:
+a process runs a handful of configurations."""
+
+
 def selfplay_callables(
     backend: Backend, cfg: LearnConfig, net: Any
 ) -> SelfPlayCallables:
-    """Build the self-play callables ONCE for ``net``'s architecture -- the search
-    closes over the net's *static* (non-array) part and takes its arrays as a
-    traced arg. Shared by :func:`learn` and
-    :func:`~settlrl_learn.training.bench.bench_selfplay`."""
+    """The self-play callables for ``net``'s architecture -- the search closes
+    over the net's *static* (non-array) part and takes its arrays as a traced
+    arg. Shared by :func:`learn` and
+    :func:`~settlrl_learn.training.bench.bench_selfplay`.
+
+    Memoised on ``(backend, the search-affecting config, the net's static)``, so
+    a second call -- a second :func:`learn` in one process -- reuses the same
+    jitted objects instead of re-tracing them. The net's arrays are a traced
+    argument and never enter the key."""
+    key = (id(backend), _callables_key(cfg))
+    net_static = eqx.partition(net, eqx.is_array)[1]
+    hit = _CALLABLES_CACHE.get(key)
+    if hit is not None and eqx.tree_equal(hit[1], net_static):
+        return hit[2]
+    calls = _build_selfplay_callables(backend, cfg, net_static)
+    _CALLABLES_CACHE[key] = (backend, net_static, calls)
+    return calls
+
+
+def _build_selfplay_callables(
+    backend: Backend, cfg: LearnConfig, net_static: Any
+) -> SelfPlayCallables:
     s = cfg.search
     setup_fn = backend.setup_policy()
     mk, search_kwargs = _weights_factory(cfg)
@@ -110,8 +143,11 @@ def selfplay_callables(
         if setup_fn is not None
         else None
     )
-    _, net_static = eqx.partition(net, eqx.is_array)
 
+    # Memoised too: `make_net_search` builds a *fresh* closure per call, and a
+    # fresh closure is a jit cache miss -- so without this the caching above
+    # would save the encoders but not the search itself.
+    @functools.cache
     def make_net_search(num_simulations: int) -> Any:
         def _net_weights(
             arrays: Any, key: Any, layout: Any, view: Any, player: Any, mask: Any
@@ -158,28 +194,6 @@ def run_selfplay(
         max_steps=cfg.selfplay.max_steps, max_game_len=cfg.selfplay.max_game_len,
         persistent=cfg.selfplay.persistent, carry=carry,
     )  # fmt: skip
-
-
-_SELFPLAY_N_PLAYERS = 2
-"""``run_selfplay`` never overrides :func:`self_play`'s seat count."""
-
-
-def carry_template(backend: Backend, cfg: LearnConfig) -> PaddedCarry:
-    """The zero :class:`~settlrl_learn.training.selfplay.PaddedCarry` a run of
-    ``cfg`` checkpoints: the eqx template resume deserialises into, and what
-    stands in without a live pool. A non-persistent run pads to zero rows."""
-    layout, state = make_board(batch_size=1, seed=0, n_players=_SELFPLAY_N_PLAYERS)
-    one = jax.tree.map(lambda x: x[0], (layout, state))
-    obs = jax.eval_shape(backend.observe, one[0], one[1], jnp.int32(0))
-    obs_spec = {k: (tuple(v.shape), np.dtype(v.dtype)) for k, v in obs.items()}
-    spec = recorded_spec(obs_spec, n_flat=N_FLAT, record_value=cfg.value_blend.max > 0)
-    return empty_padded(
-        batch_size=cfg.selfplay.batch,
-        n_players=_SELFPLAY_N_PLAYERS,
-        track_ordering=cfg.search.ordered,
-        max_game_len=cfg.selfplay.max_game_len if cfg.selfplay.persistent else 0,
-        spec=spec,
-    )
 
 
 def learn(

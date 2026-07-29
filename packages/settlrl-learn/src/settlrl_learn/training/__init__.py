@@ -14,6 +14,7 @@ from settlrl_learn.training.backend import (
     save_run_state,
 )
 from settlrl_learn.training.bench import bench_selfplay
+from settlrl_learn.training.carry import SelfPlayCarry
 from settlrl_learn.training.config import (
     ArenaConfig,
     EvalConfig,
@@ -39,7 +40,7 @@ from settlrl_learn.training.loop import (
     selfplay_callables,
 )
 from settlrl_learn.training.mlp_backend import MLPBackend, mlp_loss
-from settlrl_learn.training.selfplay import SelfPlayCarry, SelfPlayStats, self_play
+from settlrl_learn.training.selfplay import SelfPlayStats, self_play
 from settlrl_learn.training.steps import (
     evaluate,
     make_optimizer,
