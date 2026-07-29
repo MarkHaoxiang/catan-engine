@@ -81,6 +81,9 @@ class ArenaSettings(ArenaConfig):
 class WandbConfig(_Sub):
     mode: Literal["online", "offline", "disabled"] = "online"
     project: str = "settlrl-0004-alphazero"
+    # param-distribution histograms (gnn on_iter only) are far heavier than the
+    # scalar log -- fire every `hist_every` iterations, not every one. 0 disables.
+    hist_every: int = 10
 
 
 class BenchConfig(_Sub):
@@ -247,18 +250,20 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         run.log(iteration=i, **metrics)  # scalars -> metrics.jsonl
         log: dict[str, object] = {"iteration": i, **metrics}
         # param distributions as wandb histograms (whole net + each head, where a
-        # collapse shows first).
-        for name, tree in (
-            ("params/all", model),
-            ("params/policy", model.policy),
-            ("params/value", model.value),
-        ):
-            arrs = [
-                np.asarray(x).ravel()
-                for x in jax.tree.leaves(eqx.filter(tree, eqx.is_inexact_array))
-            ]
-            if arrs:
-                log[name] = wandb.Histogram(np.concatenate(arrs))  # type: ignore[arg-type]
+        # collapse shows first) -- heavier than the scalar log, so only every
+        # `hist_every` iterations (0 disables).
+        if cfg.wandb.hist_every and i % cfg.wandb.hist_every == 0:
+            for name, tree in (
+                ("params/all", model),
+                ("params/policy", model.policy),
+                ("params/value", model.value),
+            ):
+                arrs = [
+                    np.asarray(x).ravel()
+                    for x in jax.tree.leaves(eqx.filter(tree, eqx.is_inexact_array))
+                ]
+                if arrs:
+                    log[name] = wandb.Histogram(np.concatenate(arrs))  # type: ignore[arg-type]
         wb.log(log, step=i)
         winrate = metrics.get("arena_winrate")
         if winrate is not None and winrate > best:

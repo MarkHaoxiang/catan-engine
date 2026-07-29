@@ -1,0 +1,48 @@
+# @package _global_
+defaults:
+  - override /net: gnn
+  - override /teacher: heuristic
+  - override /search: scale
+  - override /selfplay: scale
+  - override /optim: scale
+  - override /value_blend: scale
+  - override /arena: scale
+net:
+  width: 96
+  layers: 4
+# scale2_long: the first long run on the new infra -- scale2's shape (persistent
+# self-play, opening-temperature anneal, PCR) stretched to ~2500 iterations
+# (~14-16h with eval/arena overhead). Measured: self-play+train ~= 18-22s/iter at
+# scale2 (922 samples/s, 16384 samples/iter); the in-loop arena at
+# arena/scale.yaml's games=128 (+az0 rung) costs ~590s/round.
+#
+# Arena budget: halve games (128 -> 64, ~590s -> ~295s/round) and halve the
+# period (every: 10 -> 150, off the scale.yaml base) rather than just widening
+# the period at games=128 (arena.every: 300 would give the same 10% wall-share:
+# 590/(300*20) ~= 9.8%) -- twice the curve points at sqrt(2) more noise per
+# point, and arena_elo_se is logged so that noise is quantified, not hidden.
+# 295/(150*20) ~= 9.8% wall-share, same as the games=128/every=300 alternative.
+n_iterations: 2500
+checkpoint_every: 10
+final_games: 400
+selfplay:
+  batch: 512
+  persistent: true
+  temperature_moves: 30
+  pcr_full_prob: 0.25
+  pcr_fast_sims: 16
+search:
+  num_simulations: 128
+replay:
+  buffer_max: 200000
+eval:
+  every: 10   # cheap (forward pass over <=2048 samples); at 2500 iters this
+              # fires 250 times -- unlike the validation run, where every=10 >
+              # its 8 iterations meant eval never fired at all.
+  samples: 2048
+arena:
+  games: 64
+  every: 150
+wandb:
+  mode: online
+  hist_every: 10
