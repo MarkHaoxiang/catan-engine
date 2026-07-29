@@ -172,6 +172,12 @@ def test_0004_final_gauntlet_neutralizes_schedules(
     # (`opponent_every`, a net opponent's `every`) -- every rung plays, at
     # `final_games` games, in the one end-of-run call. `run_arena` is stubbed
     # so this checks the composed `ArenaConfig`/`net_opponents`, not real play.
+    # `run_final_gauntlet` lives in arena_helpers (run.py re-exports it), and
+    # its `run_arena` lookup resolves against *that* module's globals -- so the
+    # patch target must be the real `arena_helpers` module (a plain import,
+    # not `load_run`'s by-path copy, which would be a distinct module object).
+    import arena_helpers  # type: ignore[import-not-found]
+
     run = load_run("0004_alphazero")
     cfg = run.compose_config(["+experiment=smoke", "final_games=7"])
     cfg = cfg.model_copy(
@@ -197,7 +203,7 @@ def test_0004_final_gauntlet_neutralizes_schedules(
         captured["net_opponents"] = net_opponents
         return {"arena_elo": 10.0, "arena_elo_se": 1.0, "arena_winrate": 0.5}
 
-    monkeypatch.setattr(run, "run_arena", fake_run_arena)
+    monkeypatch.setattr(arena_helpers, "run_arena", fake_run_arena)
     net_opponents = {"az0": (object(), -100.0, 5)}  # every=5, to be neutralized
 
     metrics = run.run_final_gauntlet(object(), object(), cfg, net_opponents)
@@ -222,3 +228,19 @@ def test_0004_gauntlet_verdict_elo_boundary() -> None:
     assert (
         run.gauntlet_verdict({"arena_elo": 44.9, "arena_elo_se": 5.0}, gate) == "fail"
     )
+
+
+def test_0004_resume_state_reads_checkpoint_and_wandb_id(tmp_path: Path) -> None:
+    # Shared by both run paths (mlp/gnn) so a resumed gnn run also continues
+    # its wandb curve, not just the mlp path.
+    run = load_run("0004_alphazero")
+    assert run._resume_state("") == (None, None)
+    assert run._resume_state(str(tmp_path / "missing")) == (None, None)
+
+    prior = tmp_path / "prior"
+    prior.mkdir()
+    (prior / "runstate.eqx").write_bytes(b"x")
+    (prior / "wandb_id.txt").write_text("abc123\n")
+    checkpoint, wandb_id = run._resume_state(str(prior))
+    assert checkpoint == prior / "runstate.eqx"
+    assert wandb_id == "abc123"

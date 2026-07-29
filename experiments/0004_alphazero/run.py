@@ -15,19 +15,24 @@ block) so ``start_run`` keeps owning the run dir + manifest.
 """
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import hydra
 import jax
 import wandb
+from arena_helpers import (
+    BenchConfig,
+    build_net_opponents,
+    gauntlet_verdict,
+    run_bench,
+    run_final_gauntlet,
+)
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, ConfigDict, Field
-from settlrl_agents import BeliefSpec
 from settlrl_learn import save_az_params
 from settlrl_learn.experiment import Config, Run, start_run
 from settlrl_learn.training import (
     ArenaConfig,
-    Backend,
     EvalConfig,
     GNNBackend,
     LearnConfig,
@@ -39,7 +44,6 @@ from settlrl_learn.training import (
     TeacherConfig,
     ValueBlendConfig,
     learn,
-    run_arena,
 )
 
 
@@ -86,14 +90,6 @@ class WandbConfig(_Sub):
     hist_every: int = 10
 
 
-class BenchConfig(_Sub):
-    """Throughput-bench knobs (mode: bench): the frozen anchor + timing scheme."""
-
-    anchor: str = "az0_gnn96x4"
-    warmup: int = 1
-    repeats: int = 3
-
-
 class AlphaZeroConfig(Config):
     """The experiment schema: the loop's grouped config plus experiment-only
     sections (net architecture, wandb, the gate)."""
@@ -130,89 +126,18 @@ class AlphaZeroConfig(Config):
         )  # fmt: skip
 
 
-# az0_gnn96x4's -58 Elo (JOURNAL.md's 2026-07-29 scale-reset entry) was fit
-# playing the checkpoint's setup phase at GNNBackend's own defaults -- a frozen
-# anchor must keep frozen semantics, so this pins those values rather than
-# reading this run's cfg.net.setup_* (which varies per run/sweep).
-NET_OPPONENT_SETUP_DEPTH = 1
-NET_OPPONENT_SETUP_TEMPERATURE = 2.0
-NET_OPPONENT_SETUP_BEAM = 4
-
-
-def build_net_opponents(
-    cfg: AlphaZeroConfig,
-) -> dict[str, tuple[BeliefSpec, float, int]]:
-    """The specs `learn` seats for ``cfg.arena.net_opponents``: each named anchor
-    loaded from ``anchors/`` and played by its own GNN search at the arena's
-    budget, under the calibration's frozen setup opener (``NET_OPPONENT_SETUP_*``)
-    and this run's search semantics."""
-    # same-dir sibling module (see run_bench's note on sys.path).
-    from anchors import load_anchor
-
-    s = cfg.search
-    out: dict[str, tuple[BeliefSpec, float, int]] = {}
-    for name, opp in cfg.arena.net_opponents.items():
-        net, netcfg = load_anchor(name)
-        backend = GNNBackend(
-            netcfg, setup_depth=NET_OPPONENT_SETUP_DEPTH,
-            setup_temperature=NET_OPPONENT_SETUP_TEMPERATURE,
-            setup_beam=NET_OPPONENT_SETUP_BEAM,
-            chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
-        )  # fmt: skip
-        agent = backend.play_agent(
-            net,
-            num_simulations=cfg.arena.sims,
-            max_num_considered_actions=cfg.arena.considered,
-        )
-        out[name] = (
-            BeliefSpec(lambda agent=agent: agent, frozenset((2,))),
-            opp.elo,
-            opp.every,
-        )
-    return out
-
-
-def run_final_gauntlet(
-    backend: Backend,
-    net: Any,
-    cfg: AlphaZeroConfig,
-    net_opponents: dict[str, tuple[BeliefSpec, float, int]],
-) -> dict[str, float]:
-    """The end-of-run verdict gauntlet: every configured opponent (the registry
-    ones plus ``net_opponents``) at ``cfg.final_games`` games each, with every
-    per-round schedule neutralized so nothing is skipped (``opponent_every={}``,
-    every net opponent's ``every`` forced to 1). With every schedule's period 1,
-    ``round_index % 1 == 0`` unconditionally, so ``round_index`` plays no role;
-    0 is passed for clarity. Seeded off ``cfg.seed + 99`` -- the legacy final-arena
-    base -- so the gauntlet's games stay disjoint from the in-loop training arenas."""
-    final_arena_cfg = ArenaConfig(
-        **cfg.arena.model_dump(exclude={"net_opponents"})
-    ).model_copy(update={"games": cfg.final_games, "opponent_every": {}})
-    final_opponents = {
-        name: (spec, elo, 1) for name, (spec, elo, _every) in net_opponents.items()
-    }
-    return run_arena(
-        backend, net, final_arena_cfg, seed=cfg.seed + 99, round_index=0,
-        net_opponents=final_opponents,
-    )  # fmt: skip
-
-
-def gauntlet_verdict(metrics: dict[str, float], gate_elo: float) -> str:
-    """``pass`` iff the gauntlet's lower 2-sigma Elo bound clears ``gate_elo``.
-
-    Raises ``ValueError`` if ``run_final_gauntlet`` produced no ``arena_elo``
-    (every configured opponent was skipped, or none carried an anchor Elo) --
-    a misconfigured gauntlet, not a legitimate zero score."""
-    if "arena_elo" not in metrics:
-        raise ValueError(
-            "gauntlet produced no arena_elo -- check cfg.arena.opponents / "
-            "arena.net_opponents are non-empty and every opponent has an "
-            "anchor_elos entry (or is a net_opponent, which carries its own)"
-        )
+def _resume_state(resume_from: str) -> tuple[Path | None, str | None]:
+    """The prior run's checkpoint (if present) and wandb id (if present) to
+    continue -- shared by both run paths so a resumed run keeps one unbroken
+    wandb curve regardless of net kind."""
+    if not resume_from:
+        return None, None
+    resume_dir = Path(resume_from)
+    checkpoint = resume_dir / "runstate.eqx"
+    id_file = resume_dir / "wandb_id.txt"
     return (
-        "pass"
-        if metrics["arena_elo"] - 2 * metrics["arena_elo_se"] >= gate_elo
-        else "fail"
+        checkpoint if checkpoint.exists() else None,
+        id_file.read_text().strip() if id_file.exists() else None,
     )
 
 
@@ -235,14 +160,13 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         setup_temperature=cfg.net.setup_temperature, setup_beam=cfg.net.setup_beam,
         chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
     )  # fmt: skip
-    resume = None
-    if cfg.resume_from:
-        prior = Path(cfg.resume_from) / "runstate.eqx"
-        resume = prior if prior.exists() else None
+    resume, wandb_id = _resume_state(cfg.resume_from)
     wb = wandb.init(
         project=cfg.wandb.project, mode=cfg.wandb.mode, config=cfg.dump(),
-        reinit=True, dir=str(run.dir),
+        reinit=True, dir=str(run.dir), id=wandb_id,
+        resume="allow" if wandb_id else None,
     )  # fmt: skip
+    (run.dir / "wandb_id.txt").write_text(str(wb.id))  # so a later run can resume it
     best = -1.0
 
     def on_iter(i: int, metrics: dict[str, float], model: BoardGNN) -> None:
@@ -293,41 +217,6 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     )  # fmt: skip
 
 
-def run_bench(run: Run, cfg: AlphaZeroConfig) -> None:
-    """Pinned self-play throughput at a frozen net; verdict is always
-    ``recorded`` -- the comparison is between two runs' result.json."""
-    import jax
-
-    # same-dir sibling module; sys.path already has this dir (script invocation
-    # and the test conftest both put it there), matching 0002/0003's convention.
-    from anchors import load_anchor
-    from settlrl_learn.training import GNNBackend, bench_selfplay
-
-    net, netcfg = load_anchor(cfg.bench.anchor)
-    if (netcfg.width, netcfg.layers, netcfg.head_depth) != (
-        cfg.net.width, cfg.net.layers, cfg.net.depth,
-    ):  # fmt: skip
-        raise ValueError(
-            f"anchor {cfg.bench.anchor!r} (width={netcfg.width}, "
-            f"layers={netcfg.layers}, head_depth={netcfg.head_depth}) does not "
-            f"match preset cfg.net (width={cfg.net.width}, layers={cfg.net.layers}, "
-            f"depth={cfg.net.depth}) -- the run manifest would misdescribe the "
-            "measured workload"
-        )
-    s = cfg.search
-    backend = GNNBackend(
-        netcfg, setup_depth=cfg.net.setup_depth,
-        setup_temperature=cfg.net.setup_temperature, setup_beam=cfg.net.setup_beam,
-        chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
-    )  # fmt: skip
-    results = bench_selfplay(
-        backend, net, cfg.to_learn_config(),
-        warmup=cfg.bench.warmup, repeats=cfg.bench.repeats, seed=cfg.seed,
-    )  # fmt: skip
-    run.log(**results)
-    run.finish("recorded", device=jax.devices()[0].device_kind, **results)
-
-
 def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     if cfg.mode == "bench":
         run_bench(run, cfg)
@@ -343,14 +232,7 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
 
     # Resume: restore the prior run's RunState and continue its wandb run so the
     # dashboard is one unbroken curve.
-    resume_dir = Path(cfg.resume_from) if cfg.resume_from else None
-    resume_from = None
-    wandb_id = None
-    if resume_dir is not None:
-        runstate = resume_dir / "runstate.eqx"
-        resume_from = runstate if runstate.exists() else None
-        id_file = resume_dir / "wandb_id.txt"
-        wandb_id = id_file.read_text().strip() if id_file.exists() else None
+    resume_from, wandb_id = _resume_state(cfg.resume_from)
 
     wb = wandb.init(
         project=cfg.wandb.project,
