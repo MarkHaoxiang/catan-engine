@@ -25,6 +25,7 @@ from settlrl_search.policy import (
     BeliefSpec,
     GameAgent,
     ObservationSpec,
+    OpponentSpec,
     Policy,
     StatefulSpec,
 )
@@ -113,7 +114,7 @@ def _actor(pickers: Sequence[_Picker]) -> Actor:
 
 
 def _evaluate_stepwise(
-    agents: Sequence[ObservationSpec | BeliefSpec | StatefulSpec | Policy],
+    agents: Sequence[OpponentSpec | Policy],
     *,
     n_steps: int | None,
     n_episodes: int | None,
@@ -209,7 +210,7 @@ _SYNC_WINDOW = 64
 
 
 def evaluate(
-    agents: Sequence[ObservationSpec | BeliefSpec | StatefulSpec | Policy],
+    agents: Sequence[OpponentSpec | Policy],
     *,
     n_steps: int | None = None,
     n_episodes: int | None = None,

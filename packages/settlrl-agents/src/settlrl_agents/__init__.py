@@ -11,6 +11,7 @@ from settlrl_search.policy import (
     FlatMask,
     GameAgent,
     ObservationSpec,
+    OpponentSpec,
     Policy,
     PolicyPrior,
     StatefulPolicy,
@@ -40,7 +41,7 @@ lookahead_policy = make_search(heuristic_value, num_simulations=0, propose_rate=
 
 _ANY_COUNT = frozenset(range(2, N_PLAYERS + 1))
 
-POLICIES: dict[str, ObservationSpec | BeliefSpec | StatefulSpec] = {
+POLICIES: dict[str, OpponentSpec] = {
     "random": ObservationSpec(lambda: random_policy, _ANY_COUNT),
     "greedy": ObservationSpec(lambda: greedy_policy, _ANY_COUNT),
     "planner": StatefulSpec(make_planner, _ANY_COUNT),
@@ -80,6 +81,7 @@ __all__ = [
     "FlatMask",
     "GameAgent",
     "ObservationSpec",
+    "OpponentSpec",
     "Policy",
     "PolicyPrior",
     "StatefulPolicy",

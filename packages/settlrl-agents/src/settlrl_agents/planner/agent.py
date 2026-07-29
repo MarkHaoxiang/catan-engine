@@ -38,7 +38,6 @@ from settlrl_agents.planner.pov import (
     ROW_IDX,
     ROW_TARGET,
     ROWS_OF_TYPE,
-    TILE_CORNERS,
     VERTEX_NEIGHBORS,
     Pov,
     flat_row,
@@ -130,18 +129,6 @@ class DiscardSurplus(Node):
         if rows.size == 0:
             return None
         return self.tactic.best(pov, rows)
-
-
-def _opponent_blocked_pips(pov: Pov, tile: int) -> float:
-    """Opponent production pips the robber on ``tile`` is denying."""
-    pips = float(pov.tile_pips[tile])
-    return float(
-        sum(
-            pips * int(pov.vertex_type[c])
-            for c in TILE_CORNERS[tile]
-            if int(pov.vertex_owner[c]) not in (0, pov.me + 1)
-        )
-    )
 
 
 class MoveRobber(Node):

@@ -176,3 +176,8 @@ class StatefulSpec(AgentSpec[StatefulPolicy]):
     Not traceable: drivers seat these through a per-step Python loop
     (``evaluate`` switches to one automatically), never a fused scan.
     """
+
+
+OpponentSpec = ObservationSpec | BeliefSpec | StatefulSpec
+"""Any seatable opponent: a ``POLICIES`` entry or a spec built elsewhere (e.g.
+an experiment wrapping a frozen checkpoint's play agent)."""

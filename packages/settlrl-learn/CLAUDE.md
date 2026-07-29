@@ -7,10 +7,10 @@ trained model can ship without training libraries.
 
 `experiment/` is the lab harness for `experiments/` (`Run`/`start_run`
 bookkeeping + the pydantic/OmegaConf `Config` base) — moved here from
-settlrl-agents (it is a training-side concern; this keeps the play/serve
-library free of `pydantic`/`omegaconf`). *Not* imported by `__init__`, so
-`import settlrl_learn` stays free of those; `pydantic`/`omegaconf` are learn
-deps only because this subpackage uses them.
+settlrl-agents, a training-side concern. *Not* imported by `__init__`, so
+`import settlrl_learn` (and the play/serve library) stays free of
+`pydantic`/`omegaconf`, which are learn deps only because this subpackage
+uses them.
 
 - `features.py` — engineered blocks mirror the heuristic's terms (production,
   expansion, ports, awards): we know they carry signal, and a model that
@@ -92,40 +92,34 @@ deps only because this subpackage uses them.
     `init` / `seams` / `play_agent` / `setup_policy` / `observe` / `to_item` /
     `empty_item` / `init_opt` / `make_step` / `eval_metrics`) and `RunState`
     (net + optimiser moments + replay buffer + iteration + best + the self-play
-    carry). `RunState` is **eqx-serialised** (`save_run_state`) — eqx's leaf
-    serialiser fits both an equinox module and a plain-JAX pytree, so it
-    replaced orbax for *both* backends.
-    `selfplay_carry` is the padded self-play pool (below) and is deliberately the
-    **last** field, so a checkpoint written before it existed is exactly the file
-    minus its trailing section: `load_run_state` reads the older fields, and if
-    the file ends there keeps the template's (empty) carry. Resuming into a
-    differently-configured run is covered in three distinct ways, because the
-    shapes do not see everything: `selfplay.persistent` **off** skips the carry
-    section unread (a `None` template carry — the run has no reader for it, so a
-    persistent checkpoint's pad costs nothing and checks nothing); a mismatched
-    section that *is* read — `persistent` turned **on** over a pool-less
-    checkpoint, or a changed `selfplay.batch` / `max_game_len` / `value_blend` —
-    trips eqx's per-leaf shape/dtype gate, which `load_run_state` re-raises as a
-    `ValueError` naming those knobs; and `search.ordered`, which no shape can
-    see, rides as its own leaf checked by `from_padded`.
+    carry). `RunState` is **eqx-serialised** (`save_run_state`): eqx's leaf
+    serialiser fits both an equinox module and a plain-JAX pytree, replacing
+    orbax for both backends. `selfplay_carry` is the padded self-play pool
+    (below) and deliberately the **last** field, so a checkpoint written before
+    it existed is exactly the file minus its trailing section — `load_run_state`
+    reads the older fields and keeps the template's empty carry if the file ends
+    there. Resuming into a differently-configured run is covered three ways,
+    since shapes alone don't see everything: `selfplay.persistent` **off** skips
+    the carry section unread (no cost, no check); a mismatched section that *is*
+    read — `persistent` turned **on** over a pool-less checkpoint, or a changed
+    `selfplay.batch` / `max_game_len` / `value_blend` — trips eqx's per-leaf
+    shape/dtype gate, re-raised by `load_run_state` as a `ValueError` naming
+    those knobs; `search.ordered`, invisible to any shape, rides as its own leaf
+    checked by `from_padded`.
     Checkpoint size: the pad is fixed-shape, so a *persistent* run pays it in
     full at every write — **1.82 GiB** at B=256 / `max_game_len` 800 / GNN obs +
-    662-wide policy, ~0.5 s to build and ~0.5 s to write (measured 2026-07-28,
-    independent of how full the pool actually is). It is transient: the loop
-    frees each `to_padded` result after the write and drops the zero template
-    once a persistent run is under way (every checkpoint then pads the live
-    carry), so steady-state host RAM is the live pool alone (~0.6 GiB at those
-    shapes). A non-persistent run pads to zero rows and pays 266 KiB (the env
-    arrays). The adopted `scale2` preset (throughput wave, 2026-07-28) runs
-    B=512 — pad is linear in `selfplay.batch`, so **~3.6 GiB** — with a
-    measured write of ~1 s in the validation run: acceptable, and this
-    supersedes the original plan's 3 GB pad tripwire
-    (`docs/superpowers/plans/2026-07-28-throughput-wave-1.md`). If that write
-    cost ever bites, the lever is a separate pad bound below `max_game_len`,
-    not the fixed shape. `save_run_state` writes to a sibling `.tmp` and
-    `os.replace`s it into place, so the write is atomic — a kill mid-write
-    (the validated operating procedure for a long run) leaves the previous
-    checkpoint intact instead of truncating the only one.
+    662-wide policy, ~0.5 s to build and write (measured 2026-07-28, independent
+    of pool fullness). Transient: the loop frees each `to_padded` result after
+    writing and drops the zero template once persistent, so steady-state host
+    RAM is just the live pool (~0.6 GiB at those shapes); non-persistent pads to
+    zero rows, 266 KiB. The adopted `scale2` preset (throughput wave,
+    2026-07-28) runs B=512 — pad linear in `selfplay.batch`, **~3.6 GiB** — at a
+    measured ~1 s write: acceptable, superseding the original plan's 3 GB pad
+    tripwire (`docs/superpowers/plans/2026-07-28-throughput-wave-1.md`). If that
+    cost ever bites, the lever is a pad bound below `max_game_len`, not the
+    fixed shape. `save_run_state` writes to a sibling `.tmp` and `os.replace`s
+    it into place — atomic, so a kill mid-write (the validated long-run
+    procedure) leaves the previous checkpoint intact.
   - `training/selfplay.py::self_play` — batched n-player self-play, the search
     (net's or a fixed teacher's) guiding the re-determinizing moves and improved
     policy. The backend's `observe` records the *true* board (net learns the
@@ -135,46 +129,43 @@ deps only because this subpackage uses them.
     the net plays setup too). **Playout-cap randomization** (KataGo): with a
     `fast_search` and `full_prob` < 1, each *step* (not per-move — the
     vmap-lockstep constraint) is full (deep `search`) with prob `full_prob` else
-    fast (cheap `fast_search`); every position records its outcome value, but the
-    `train_policy` flag is 1 only on full-search positions, so the policy loss
-    trains on deep targets only (value on all). `full_prob` = 1 disables it.
+    fast (cheap `fast_search`); every position records its outcome value, but
+    `train_policy` is 1 only on full-search positions, so the policy loss trains
+    on deep targets only (value on all). `full_prob` = 1 disables it.
     **Opening-temperature anneal** (`temperature_moves` > 0): a lane samples at
     `temperature` for its first that many *recorded* moves of its current game,
     then argmax for the rest — counted off the live pending length
-    (`len(pending[lane])`), which is already the per-lane recorded-move count
-    (resets on flush; only undercounts once a lane is trimmed past
-    `max_game_len`, by which point the count is already far past any sane
-    `temperature_moves`), so no carry field was added for it. 0 (the default)
+    (`len(pending[lane])`, the per-lane recorded-move count, reset on flush; it
+    only undercounts once a lane is trimmed past `max_game_len`, well past any
+    sane `temperature_moves`), so no carry field was needed for it. 0 (default)
     keeps `temperature` flat and draws no extra RNG.
     Returns `(Samples, SelfPlayStats, SelfPlayCarry | None)`: `env_steps`
     (batched env steps, each advancing all lanes), `recorded`, and `discarded` —
-    positions generated but never returned, i.e. the pending buffers of games
-    still unfinished when the call hit its sample target, plus `max_game_len`
-    trims. The loop logs the latter as `selfplay_discarded`: the
-    *iteration-boundary waste* (games are cut mid-flight every iteration, and
-    only finished games yield samples) — measured at 72.8% of searched positions
-    at B=256 and 91% at B=1024, which is what gates the batch lever (exp 0004,
-    2026-07-28).
-    **The persistent carry** (`selfplay.persistent`, opt-in) is the fix: the
-    call returns a live `SelfPlayCarry` — the env object itself (a stateful
-    wrapper over batched arrays with auto-reset, so it can simply be held and
+    positions generated but never returned: the pending buffers of games still
+    unfinished when the call hit its sample target, plus `max_game_len` trims.
+    The loop logs the latter as `selfplay_discarded`, the *iteration-boundary
+    waste* (games cut mid-flight every iteration; only finished games yield
+    samples) — measured at 72.8% of searched positions at B=256 and 91% at
+    B=1024, gating the batch lever (exp 0004, 2026-07-28).
+    **The persistent carry** (`selfplay.persistent`, opt-in) is the fix: the call
+    returns a live `SelfPlayCarry` — the env object itself (a stateful wrapper
+    over batched arrays with auto-reset, so it can simply be held and
     re-stepped), the per-lane pending buffers, the RNG key, the per-key sample
     shape+dtype `spec`, and a `surplus` counter — and passing it back resumes
-    the games in flight. `surplus` is the samples handed out past the cumulative
-    request (a finished game flushes whole, so a call overshoots); crediting it
-    to the next call is what makes a sequence of persistent calls of `n` produce
-    *exactly* what one call of their total would, positions and RNG stream
-    included (asserted in `tests/test_selfplay.py`) — provided no call exhausts
-    its own `max_steps`, which is a per-call budget. A resumed call whose request
-    the surplus already covers takes **zero** env steps and returns empty arrays
-    built from `spec` — hence the carried dtypes, since `mask` is bool and a
-    float32 empty would silently promote a concatenated stream.
-    `discarded` then counts only trims.
-    Flag off, everything is bit-identical to before (a frozen digest golden
-    captured pre-change guards the RNG stream and recording order). The cost:
-    a persistent call's output is pure in (`seed`, carried state) rather than in
-    `seed` alone — `seed` seeds only the first call — which is why the carry
-    reaches the checkpoint (`training/carry.py`, below).
+    the games in flight. `surplus` is the samples handed out past the
+    cumulative request (a finished game flushes whole, so a call overshoots);
+    crediting it to the next call makes a sequence of persistent calls of `n`
+    produce *exactly* what one call of their total would, positions and RNG
+    stream included (asserted in `tests/test_selfplay.py`), provided no call
+    exhausts its own per-call `max_steps` budget. A resumed call the surplus
+    already covers takes **zero** env steps and returns empty arrays built from
+    `spec` — hence the carried dtypes, since `mask` is bool and a float32 empty
+    would silently promote a concatenated stream. `discarded` then counts only
+    trims. Flag off, everything is bit-identical to before (a frozen digest
+    golden captured pre-change guards the RNG stream and recording order). The
+    cost: a persistent call's output is pure in (`seed`, carried state) rather
+    than `seed` alone — `seed` seeds only the first call — which is why the
+    carry reaches the checkpoint (`training/carry.py`, below).
   - `training/carry.py` — the pool types and the projection that checkpoints
     them: `SelfPlayCarry` (live, above), `PaddedCarry`/`PaddedEnv`, the
     `to_padded`/`from_padded` pair and the `empty_padded`/`carry_template` zero
@@ -182,64 +173,63 @@ deps only because this subpackage uses them.
     recorded keys, so a call site's spec and the padding code's notion of
     "derived" cannot drift) and `make_env` — self-play's *only* env construction
     site, since a carried pool is restorable only into an identically-built env.
-    The padded form is fixed-shape because that is what an eqx deserialisation
-    template is: every recorded key pads to `(batch, max_game_len, …)` in host
-    numpy with a per-lane `pending_len`, and the env — a held *object*, not a
-    pytree — contributes `PaddedEnv`, its complete array state with PRNG keys as
-    raw uint32 (eqx cannot serialise typed key arrays). `from_padded` rebuilds an
-    equivalent env by re-constructing one and overwriting that state; the ctor's
-    `seed` is not live state (only `reset` reads it). A test asserts `PaddedEnv`
-    still names every array attribute the env holds, so an engine-side addition
-    breaks loudly instead of silently not being carried.
+    The padded form is fixed-shape, as an eqx deserialisation template must be:
+    every recorded key pads to `(batch, max_game_len, …)` in host numpy with a
+    per-lane `pending_len`; the env — a held *object*, not a pytree —
+    contributes `PaddedEnv`, its complete array state with PRNG keys as raw
+    uint32 (eqx cannot serialise typed key arrays). `from_padded` rebuilds an
+    equivalent env by re-constructing one and overwriting that state (the
+    ctor's `seed` isn't live state — only `reset` reads it). A test asserts
+    `PaddedEnv` still names every array attribute the env holds, so an
+    engine-side addition breaks loudly instead of silently not being carried.
   - `training/loop.py::learn(backend, cfg: LearnConfig, *, teacher_value=…,
     checkpoint_dir=…, resume_from=…, …)` — the orchestrator over the `steps`
     units. Per-iteration RNG is a pure function of `cfg.seed` and the iteration
     index, so `resume_from` (a `runstate.eqx`) continues bit-identically (tested
-    in `tests/` resume checks for both backends, and with `selfplay.persistent`
-    on — where the pool in flight, not just the seed, decides what comes next).
-    Under `persistent` the loop holds the carry across iterations and folds it
-    into every checkpoint; a *zero-sample* iteration is then ordinary rather than
-    degenerate (the carried surplus already covered the request, so the call took
-    no env step), so it skips only the data steps — eval, replay add, optimiser —
-    and still counts, checkpoints and proceeds. `cfg.optim.reuse` caps
-    updates/iter at the AZ sample-reuse factor (the value-overfit fix); every
-    `cfg.eval.every` iters the first `cfg.eval.samples` of that iter's fresh batch
-    are scored (`eval_metrics` -> the `val_*` metrics) under the *pre-train* net,
-    before the batch trains -- a valid held-out-in-time signal that wastes no data
-    (the whole batch still trains); `teacher_value` (with `cfg.teacher.iters` > 0)
+    for both backends, and with `selfplay.persistent` on, where the pool in
+    flight — not just the seed — decides what comes next). Under `persistent`
+    the loop holds the carry across iterations and folds it into every
+    checkpoint; a *zero-sample* iteration is then ordinary rather than
+    degenerate (the carried surplus already covered the request, so the call
+    took no env step) — it skips only the data steps (eval, replay add,
+    optimiser) and still counts, checkpoints and proceeds. `cfg.optim.reuse`
+    caps updates/iter at the AZ sample-reuse factor (the value-overfit fix);
+    every `cfg.eval.every` iters the first `cfg.eval.samples` of that iter's
+    fresh batch are scored (`eval_metrics` → `val_*`) under the *pre-train* net,
+    before the batch trains — a held-out-in-time signal that wastes no data (the
+    whole batch still trains); `teacher_value` (with `cfg.teacher.iters` > 0)
     warm-starts from a fixed strong search at `cfg.teacher.sims` (the cold-start
     fix). `cfg.value_blend.max` > 0 trains value on Canopy's `(1−α)z + α·q`
-    (game outcome blended with the searched root `q` from
+    (outcome blended with the searched root `q` from
     `make_search_weights_value`, α ramped 0→max over `cfg.value_blend.ramp`
     iters) — the dice-variance fix; only the training slice is blended, the eval
     slice keeps raw `z` (see the Canopy reference below). `cfg.search.chance_nodes`
-    /`dev_chance` thread the search's explicit chance-node mode through self-play
-    (the backends carry the same flags for the arena `play_agent`), so the search
-    plans past rolls at train and play time. `cfg.search.ordered` turns on the
-    action-ordering lock-out (`settlrl_engine.ordering`): self-play's env runs
-    `track_ordering` and the search threads the lock-out deeper; the backends
-    carry it for the arena agent too.
+    /`dev_chance` (explicit dice/dev chance nodes) and `cfg.search.ordered`
+    (the `settlrl_engine.ordering` action lock-out, via self-play's
+    `track_ordering`) thread through self-play and the arena `play_agent`
+    alike, so both plan past rolls and respect the lock-out at train and play
+    time.
     `loop.selfplay_callables(backend, cfg, net)` builds the once-built
     jitted+vmapped self-play callables (`view_of` / `observe_of` / `setup_search`
     + a `make_net_search(num_simulations)` factory closing over the net's *static*
-    part); `learn` and `bench_selfplay` share it so the wiring cannot drift.
-    It is **memoised** (`loop._CALLABLES_CACHE`, keyed on the backend's identity,
-    the whole search config + the value-blend factory choice, and the net's
-    static): a fresh closure is a jit cache miss, so an uncached second `learn`
-    in one process re-traced every self-play jit — a measured ~68 s startup spike
-    at scale (8.49 s → 1.54 s per warm `learn` even on the tiny test config,
+    part); `learn` and `bench_selfplay` share it so the wiring cannot drift. It is
+    **memoised** (`loop._CALLABLES_CACHE`, keyed on the backend's identity, the
+    whole search config + the value-blend factory choice, and the net's static):
+    a fresh closure is a jit cache miss, so an uncached second `learn` in one
+    process re-traced every self-play jit — a measured ~68 s startup spike at
+    scale (8.49 s → 1.54 s per warm `learn`, even on the tiny test config,
     against a cache-clear control). It does **not** move the test-suite floor
-    (65 s → 83 s over the split: xdist workers are separate processes, most tests
-    build a fresh backend, and the XLA disk cache already absorbs the compiles).
-    Reuse is semantically free (the callables are pure in that key; the net's
-    arrays are a traced argument, never closed over) and
-    `test_selfplay_callables_*` pins it: the warm-hit `learn` must reproduce the
-    cold-built one leaf-for-leaf. The key deliberately omits `selfplay.batch` and
-    the seat count — those ride the traced arguments' shapes, which jax keys its
-    own cache on — and the setup knobs, which live on the backend. The static
-    check on a hit compares *treedef and non-array fields*, not array shapes
-    (`AZParams` statics are all-`None`, so two MLP widths compare equal) — it
-    catches a structurally different net reaching an entry, while a same-shape
+    (65 s → 83 s over the split: xdist workers are separate processes, most
+    tests build a fresh backend, and the XLA disk cache already absorbs the
+    compiles). Reuse is semantically free (the callables are pure in that key;
+    the net's arrays are a traced argument, never closed over), and
+    `test_selfplay_callables_*` pins it — a warm-hit `learn` must reproduce the
+    cold-built one leaf-for-leaf. The key omits `selfplay.batch` and the seat
+    count (they ride the traced arguments' shapes, which jax keys its own cache
+    on) and the setup knobs (which live on the backend); its static check
+    compares *treedef and non-array fields*, not array shapes (`AZParams`
+    statics are all-`None`, so two MLP widths compare equal) — it catches a
+    structurally different net reaching an entry, while a same-shape
     different-width net is already separated by its backend's identity.
   - `training/arena.py::arena` — the net's `ArenaResult(wins, episodes)` vs. a
     `POLICIES` opponent, seat-swapped at 2p (`lookahead` = the Stage-1 gate;
@@ -255,33 +245,32 @@ deps only because this subpackage uses them.
     fixed `cfg.arena.anchor_elos` scale (heuristic pinned at 0 = the gate; random
     well below) — **and `arena_elo_se`**, its standard error (`anchored_elo_se`,
     Fisher information at the MLE).
-    `cfg.arena.opponent_every` (opponent -> N) skips an opponent on rounds where
-    `run_arena`'s `round_index` (the loop's count of arena invocations) isn't a
-    multiple of N, saving wall-clock on anchors that no longer carry information
-    (e.g. `random`, which pins at 1.0 winrate early). **Frozen checkpoints join the
-    gauntlet** through `learn(..., net_opponents={name: (spec, elo, every)})` →
-    `run_arena`: ready play specs, so the library never learns about checkpoint
-    files or architectures — the experiment composes them (0004's
-    `anchors.load_anchor` + `GNNBackend.play_agent`; the az0 rung sits at −58,
-    calibrated by a joint round-robin MLE — 0001_bench_smoke's `calibrate`
-    variant, JOURNAL 2026-07-29 — superseding the earlier provisional −100 from
-    its 0.361 vs lookahead alone). They are scheduled by their own
-    `every`, reported as `arena_vs_<name>`, and join the same Elo MLE; their seeds
-    start at `seed + steps.NET_OPPONENT_SEED_BASE` (50k — room for five registry
-    opponents), so adding one leaves the registry opponents' games bit-identical: a
-    mid-rung must not perturb the curve it refines. The loop holds the arena **seed
-    fixed across iterations** (no `+i`), so every checkpoint faces the same games
-    and the curve is paired (the dice/board luck differences out) — the chosen
-    variance cut, matching canopy/lc0's paired-seed tournaments over a checkpoint
-    round-robin (a within-pool round-robin drifts when the pool changes; the
-    anchored gauntlet stays comparable across runs). Anchors must stay frozen for a
-    run. The per-iter `val_*` / `policy_*` / `value_*` health metrics (from
-    `Backend.eval_metrics`) are the cheap high-frequency proxies between arena
-    rounds.
+    `cfg.arena.opponent_every` (opponent → N) skips an opponent on rounds where
+    `run_arena`'s `round_index` isn't a multiple of N, saving wall-clock on
+    anchors that no longer carry information (e.g. `random`, which pins at 1.0
+    winrate early). **Frozen checkpoints join the gauntlet** through
+    `learn(..., net_opponents={name: (spec, elo, every)})` → `run_arena`: ready
+    play specs, so the library never learns about checkpoint files or
+    architectures — the experiment composes them (0004's `anchors.load_anchor`
+    + `GNNBackend.play_agent`; the az0 rung sits at −58, calibrated by a joint
+    round-robin MLE — 0001_bench_smoke's `calibrate` variant, JOURNAL
+    2026-07-29 — superseding the earlier provisional −100 from its 0.361 vs
+    lookahead alone). They're scheduled by their own `every`, reported as
+    `arena_vs_<name>`, and join the same Elo MLE; their seeds start at `seed +
+    steps.NET_OPPONENT_SEED_BASE` (50k — room for five registry opponents), so
+    adding one leaves the registry opponents' games bit-identical — a mid-rung
+    must not perturb the curve it refines. The loop holds the arena **seed
+    fixed across iterations** (no `+i`), so every checkpoint faces the same
+    games and the curve is paired (the dice/board luck differences out) — the
+    chosen variance cut, matching canopy/lc0's paired-seed tournaments over a
+    checkpoint round-robin (a within-pool round-robin drifts when the pool
+    changes). Anchors must stay frozen for a run. The per-iter `val_*` /
+    `policy_*` / `value_*` health metrics (`Backend.eval_metrics`) are the
+    cheap high-frequency proxies between arena rounds.
     The optimiser is `steps.make_optimizer(cfg.optim)` — adamw, optionally
     preceded by `clip_by_global_norm` (`cfg.optim.grad_clip`, default 1.0; 0
-    disables). The clip is stateless, so an unclipped checkpoint must be resumed
-    with `grad_clip=0` (its opt-state has no clip layer).
+    disables). Stateless, so an unclipped checkpoint must resume with
+    `grad_clip=0` (its opt-state has no clip layer).
   - `training/bench.py::bench_selfplay(backend, net, cfg, *, warmup, repeats,
     seed)` — the self-play throughput probe (the loop's dominant cost, isolated:
     no optimiser/replay/arena). Under `selfplay.persistent` off (the default),
@@ -329,33 +318,30 @@ package exists; Stage 3 (policy head, self-play iteration) only after.
 
 A Rust AlphaZero framework whose flagship example is a 1v1 Catan agent
 (`nexus-v3`, claimed "strongest public 1v1 Catan agent" — unbenchmarked against
-ours). It is the point past our leaf-is-the-ceiling gate: learned policy + WDL
-value head, self-play, Gumbel improved-policy interior selection + PUCT/Dirichlet
-root (800 sims), explicit chance nodes for dice and dev draws, and Single-Observer
-ISMCTS that filters per-simulation legality in a custom tree (our search now does
-this too — `settlrl_search.ismcts`, which retired the mctx engine). It is
-1v1 only, so it never meets the 3-4p
-paranoid-frame / opponent-model problem, and it *disables determinization during
-self-play* (the net learns the Bayesian-average-over-hands policy; determinize
-only at play time).
+ours). It sits past our leaf-is-the-ceiling gate: learned policy + WDL value
+head, self-play, Gumbel improved-policy interior selection + PUCT/Dirichlet
+root (800 sims), explicit chance nodes for dice and dev draws, and
+Single-Observer ISMCTS filtering per-simulation legality in a custom tree
+(ours does this too now — `settlrl_search.ismcts`, which retired the mctx
+engine). 1v1 only, so it never meets the 3-4p paranoid-frame / opponent-model
+problem, and it *disables determinization during self-play* (the net learns
+the Bayesian-average-over-hands policy; determinize only at play time).
 
 Techniques aimed at Catan's dice variance (the variance-starved-depth problem):
 
-- **Value-target blending** `(1−α)·z + α·q` (outcome blended with the searched
-  root q) — **done**: `learn`'s `value_blend_max`, q from
-  `make_search_weights_value`.
-- **Explicit chance nodes** for dice + dev draws — **done** (opt-in
-  `chance_nodes`/`dev_chance`; details in settlrl-search/CLAUDE.md). Canopy also
-  forces a canonical **action ordering** to cut transpositions — **done** (opt-in
-  `ordered`, `settlrl_engine.ordering`).
+- **Value-target blending** `(1−α)·z + α·q` — **done** (`cfg.value_blend.max`,
+  mechanics under `training/loop.py` above).
+- **Explicit chance nodes** for dice + dev draws — **done**
+  (`cfg.search.chance_nodes`/`dev_chance`, above; details in
+  settlrl-search/CLAUDE.md). Canopy also forces a canonical **action ordering**
+  to cut transpositions — **done** (`cfg.search.ordered`, above).
 - **EMA auxiliary value heads** at horizons (e.g. `[4, 10, 30]`), trained on
   `ema = α·Q[t] + (1−α)·ema`, sharing the trunk — *not yet*.
 - **Playout-cap randomization** (KataGo): most moves a small search, a fraction
   the full budget; only full-search positions contribute policy targets —
-  **done** (opt-in `selfplay.pcr_full_prob` < 1 + `pcr_fast_sims`; per-*step*
-  full/fast rather than per-move, the vmap-lockstep constraint; the policy CE is
-  masked to full-search positions via the item's `train_policy` flag). Pairs with
-  a larger `search.num_simulations` for the full steps — the affordable way to add
-  the search depth the policy diagnostic wants.
+  **done** (`selfplay.pcr_full_prob`/`pcr_fast_sims`, mechanics under
+  `training/selfplay.py` above). Pairs with a larger `search.num_simulations`
+  for the full steps — the affordable way to add the search depth the policy
+  diagnostic wants.
 
 Repo + METHODS.md + examples/catan/OPTIMIZATIONS.md; see [[canopy-reference]].

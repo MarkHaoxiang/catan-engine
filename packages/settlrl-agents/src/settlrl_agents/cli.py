@@ -8,7 +8,7 @@ import math
 from typing import Annotated, NamedTuple
 
 import typer
-from settlrl_search.policy import BeliefSpec, ObservationSpec, StatefulSpec
+from settlrl_search.policy import OpponentSpec
 
 from settlrl_agents import POLICIES
 from settlrl_agents.evaluate import evaluate
@@ -71,7 +71,7 @@ def compare(
     )
 
 
-def build_spec(text: str) -> ObservationSpec | BeliefSpec | StatefulSpec:
+def build_spec(text: str) -> OpponentSpec:
     """An agent spec from a registry name or a JSON configuration.
 
     JSON shape: ``{"kind": <name>, "params": {<make kwargs>},
@@ -139,7 +139,7 @@ def bench(
     wins_a = wins_b = episodes = 0
     by_position: list[tuple[int, int]] = []
     for pos in range(players):
-        agents: list[ObservationSpec | BeliefSpec | StatefulSpec] = [b] * players
+        agents: list[OpponentSpec] = [b] * players
         agents[pos] = a
         r = evaluate(
             agents,

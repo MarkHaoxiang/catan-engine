@@ -13,19 +13,10 @@ from __future__ import annotations
 
 from typing import Any, NamedTuple
 
-from settlrl_agents import (
-    POLICIES,
-    BeliefSpec,
-    ObservationSpec,
-    StatefulSpec,
-    evaluate,
-)
+from settlrl_agents import POLICIES, BeliefSpec, evaluate
+from settlrl_search.policy import OpponentSpec as OpponentSpec
 
 from settlrl_learn.training.backend import Backend
-
-OpponentSpec = ObservationSpec | BeliefSpec | StatefulSpec
-"""Any seatable opponent: a ``POLICIES`` entry or a spec built elsewhere (e.g.
-an experiment wrapping a frozen checkpoint's play agent)."""
 
 
 class ArenaResult(NamedTuple):
