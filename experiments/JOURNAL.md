@@ -70,3 +70,37 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   Runs: runs/0004_alphazero/2026-07-28T103722Z (256),
   runs/0004_alphazero/2026-07-28T104353Z (512),
   runs/0004_alphazero/2026-07-28T105136Z (1024).
+- 0004 throughput wave verdict: persistent self-play adopted (2026-07-28).
+  `selfplay.persistent` (the lane pool) reruns the batch sweep with the
+  discard term actually gone, and it flips the earlier verdict: baseline
+  193.07 samples/s (B=256, non-persistent, 72.8% discarded) →
+  persistent@256 482.42 samples/s (2.50x, the lane pool's isolated
+  contribution — same batch, discard 72.8%→0.0%) →
+  persistent@512 **922.53 samples/s (4.78x compounded)**, discard 0.0%
+  — the batch lever now pays off once the iteration-boundary waste is gone,
+  matching the design-phase prediction the non-persistent sweep falsified.
+  persistent@1024 regresses off that peak (834.76 samples/s, still
+  discard 0.0%) — B=512 is the sweep winner. Adopted into
+  `conf/experiment/scale2.yaml` (small's shape: gnn 96x4, teacher
+  warm-start, Canopy q-blend): `selfplay.batch=512`, `persistent=true`,
+  `temperature_moves=30` (untuned starting value), playout-cap
+  randomization on (`pcr_full_prob=0.25`, `pcr_fast_sims=16`,
+  `search.num_simulations=128` for the full steps) — PCR/anneal are
+  training-lever adoptions, not bench-measured (bench mode keeps PCR off,
+  sims=64, per Step 2). An 8-iteration validation run
+  (`+experiment=scale2 n_iterations=8 arena.every=4 wandb.mode=disabled`,
+  runs/0004_alphazero/2026-07-28T233122Z) confirms `selfplay_discarded`
+  is 0.0 at every iteration (not just from iter 2 on), losses drop
+  2.29→~1.2 with no NaNs, policy entropy stays alive (0.46-0.52, no
+  collapse), and per-iteration self-play throughput (steady-state
+  ~850-1775 samples/s across a live, still-cold net) is order-of-magnitude
+  consistent with the frozen-net bench number. Checkpoint+resume smoke
+  (`checkpoint_every=4`, killed after iteration 4's checkpoint —
+  runs/0004_alphazero/2026-07-28T234523Z — then `resume_from`'d into
+  runs/0004_alphazero/2026-07-28T235055Z) resumes cleanly at iteration 4/8
+  and completes iterations 5-8 with no errors, matching losses. Sweep
+  runs: runs/0004_alphazero/2026-07-28T230720Z (persistent@256),
+  runs/0004_alphazero/2026-07-28T231144Z (persistent@512, winner),
+  runs/0004_alphazero/2026-07-28T231545Z (persistent@1024). Parallel-descent
+  search work (K-way SH blocks, virtual loss) stays out of scope until a
+  scale2-based long run re-tests the plateau.
