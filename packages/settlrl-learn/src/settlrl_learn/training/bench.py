@@ -4,8 +4,11 @@ The training loop's cost is dominated by self-play, so this times exactly what
 an iteration times (:func:`~settlrl_learn.training.loop.run_selfplay` over the
 loop's own callables, :func:`~settlrl_learn.training.loop.selfplay_callables`)
 with the net held fixed -- no optimiser, no replay, no arena. The first call is
-untimed (it pays the XLA compile) and the timed repeats all run the identical
-workload, so the spread across repeats is measurement noise, not workload drift.
+untimed (it pays the XLA compile); under ``selfplay.persistent`` off (the
+default) the timed repeats all run the identical workload, so the spread
+across them is measurement noise, not workload drift -- under ``persistent``
+they are sequential continuations of one self-play pool instead (see
+``bench_selfplay``'s docstring).
 
 A training-side module: not imported by the package root.
 """
@@ -51,11 +54,22 @@ def bench_selfplay(
     the non-persistent path, and the timing headline stays the across-repeat
     median (steady-state flush rate, not a single sample).
 
-    Reports ``samples_per_s`` / ``moves_per_s`` / ``sims_per_s`` (medians over
-    the repeats), the per-repeat wall times ``t_0..t_{repeats-1}`` with their
-    median ``t_median_s``, and the workload's ``samples`` / ``env_steps`` /
-    ``discarded``. A *move* is one lane-step (``env_steps * cfg.selfplay.batch``)
-    and each move runs ``cfg.search.num_simulations`` simulations.
+    Reports ``samples_per_s`` / ``moves_per_s`` / ``sims_per_s`` as the
+    **median of each repeat's own ratio** (repeat *i*'s samples over its own
+    ``t_i``, not the last repeat's count over the cross-repeat ``t_median_s``
+    -- pairing every repeat's numerator with a different repeat's denominator
+    would mismatch workload and timing whenever repeats differ, as persistent
+    ones do). When repeats share one workload (non-persistent) this is
+    numerically identical to the old aggregate formula: with ``n`` constant,
+    ``median(n / t_i) == n / median(t_i)``, since a ratio by a positive
+    constant is a monotonic transform of ``t_i`` and so preserves the median's
+    rank position. Also reports the per-repeat wall times ``t_0..t_{repeats-1}``
+    with their own median ``t_median_s``, and the *last* repeat's ``samples``
+    / ``env_steps`` / ``discarded`` (identical to every other repeat's when
+    the workload is shared; under ``persistent`` just that one repeat's, since
+    repeats are sequential continuations rather than a workload total). A
+    *move* is one lane-step (``env_steps * cfg.selfplay.batch``) and each move
+    runs ``cfg.search.num_simulations`` simulations.
 
     Raises ``ValueError`` under playout-cap randomization
     (``cfg.selfplay.pcr_full_prob`` < 1): the sims-per-move accounting assumes
@@ -90,23 +104,26 @@ def bench_selfplay(
     for _ in range(warmup):
         *_, carry = play(seed + 1000, carry)
     times: list[float] = []
+    samples_ratios: list[float] = []
+    moves_ratios: list[float] = []
     n_samples = env_steps = discarded = 0
     for _ in range(repeats):
         t0 = time.perf_counter()
         n_samples, env_steps, discarded, carry = play(seed, carry)
-        times.append(time.perf_counter() - t0)
+        dt = time.perf_counter() - t0
+        times.append(dt)
+        samples_ratios.append(n_samples / dt)
+        moves_ratios.append((env_steps * cfg.selfplay.batch) / dt)
 
-    t_median = statistics.median(times)
-    moves = env_steps * cfg.selfplay.batch
-    moves_per_s = moves / t_median
+    moves_per_s = statistics.median(moves_ratios)
     out = {
-        "samples_per_s": n_samples / t_median,
+        "samples_per_s": statistics.median(samples_ratios),
         "moves_per_s": moves_per_s,
         "sims_per_s": moves_per_s * cfg.search.num_simulations,
         "samples": float(n_samples),
         "env_steps": float(env_steps),
         "discarded": float(discarded),
-        "t_median_s": t_median,
+        "t_median_s": statistics.median(times),
     }
     out.update({f"t_{i}": t for i, t in enumerate(times)})
     return out
