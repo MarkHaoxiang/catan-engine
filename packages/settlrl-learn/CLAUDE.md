@@ -237,8 +237,10 @@ deps only because this subpackage uses them.
     gauntlet** through `learn(..., net_opponents={name: (spec, elo, every)})` →
     `run_arena`: ready play specs, so the library never learns about checkpoint
     files or architectures — the experiment composes them (0004's
-    `anchors.load_anchor` + `GNNBackend.play_agent`; the az0 rung sits at a
-    provisional −100, from its 0.361 vs lookahead). They are scheduled by their own
+    `anchors.load_anchor` + `GNNBackend.play_agent`; the az0 rung sits at −58,
+    calibrated by a joint round-robin MLE — 0001_bench_smoke's `calibrate`
+    variant, JOURNAL 2026-07-29 — superseding the earlier provisional −100 from
+    its 0.361 vs lookahead alone). They are scheduled by their own
     `every`, reported as `arena_vs_<name>`, and join the same Elo MLE; their seeds
     start at `seed + steps.NET_OPPONENT_SEED_BASE` (50k — room for five registry
     opponents), so adding one leaves the registry opponents' games bit-identical: a

@@ -150,7 +150,7 @@ def test_0004_scale_arena_names_the_az0_rung() -> None:
     run = load_run("0004_alphazero")
     cfg = run.compose_config(["+experiment=small"])
     az0 = cfg.arena.net_opponents["az0_gnn96x4"]
-    assert (az0.elo, az0.every) == (-100.0, 1)
+    assert (az0.elo, az0.every) == (-58.0, 1)
     assert not hasattr(cfg.to_learn_config().arena, "net_opponents")
 
 
@@ -161,7 +161,7 @@ def test_0004_builds_net_opponent_specs() -> None:
     cfg = run.compose_config(["+experiment=small"])
     opponents = run.build_net_opponents(cfg)
     spec, elo, every = opponents["az0_gnn96x4"]
-    assert (elo, every) == (-100.0, 1)
+    assert (elo, every) == (-58.0, 1)
     assert 2 in spec.n_players and callable(spec.policy)
 
 

@@ -104,3 +104,26 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   runs/0004_alphazero/2026-07-28T231545Z (persistent@1024). Parallel-descent
   search work (K-way SH blocks, virtual loss) stays out of scope until a
   scale2-based long run re-tests the plateau.
+- 0001_bench_smoke/calibrate — pass, one-off anchor-scale reset (2026-07-29):
+  a joint Elo MLE (coordinate-ascent Bradley-Terry, `calibrate.py::joint_fit`)
+  over the complete round-robin {random, greedy, lookahead, mcts, az0_gnn96x4}
+  (10 unordered pairs, seat-swapped 2p, n=4238 games total; lookahead pinned
+  at 0). Fitted: random −1115 ± 71, greedy −231 ± 12, mcts +38 ± 12,
+  az0_gnn96x4 −58 ± 12 (Fisher SE). All four sanity gates held (lookahead = 0
+  by construction; greedy in [−480, −180]; random < −600; az0 in (−400, 0)).
+  Old → new: `arena.anchor_elos.random` −800.0 → −1115.0
+  (`conf/arena/default.yaml` + `conf/arena/scale.yaml`); az0_gnn96x4's
+  `net_opponents` elo (provisional, from its 0.361 winrate vs lookahead
+  alone) −100.0 → −58.0 (`conf/arena/scale.yaml`). **Historical-shift
+  caveat**: every past `arena_elo` reading (every 0004 run to date) was on
+  the old −800 scale and is not comparable at face value to a run using
+  these anchors — the *relative* ordering of checkpoints within one run is
+  unaffected, only the absolute number's meaning shifts. **Semantics scope**:
+  the calibration is valid only for arena/search settings matching
+  `conf/arena/scale.yaml` (sims=24, considered=16) + `conf/search/scale.yaml`
+  (chance_nodes=false, dev_chance=true, ordered=false) — recorded verbatim in
+  the run's `result.json` (`search_semantics`) alongside the fitted ratings
+  and matrix. A differently-configured arena (different sims/considered, or
+  chance_nodes/dev_chance/ordered flipped) needs its own calibration; these
+  anchors should not be reused there. Run:
+  runs/0001_bench_smoke/2026-07-29T034807Z.
