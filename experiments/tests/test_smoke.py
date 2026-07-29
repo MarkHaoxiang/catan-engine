@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import EXPERIMENTS, load_run
@@ -162,3 +163,62 @@ def test_0004_builds_net_opponent_specs() -> None:
     spec, elo, every = opponents["az0_gnn96x4"]
     assert (elo, every) == (-100.0, 1)
     assert 2 in spec.n_players and callable(spec.policy)
+
+
+def test_0004_final_gauntlet_neutralizes_schedules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The final gauntlet ignores the in-loop `arena.games` and every schedule
+    # (`opponent_every`, a net opponent's `every`) -- every rung plays, at
+    # `final_games` games, in the one end-of-run call. `run_arena` is stubbed
+    # so this checks the composed `ArenaConfig`/`net_opponents`, not real play.
+    run = load_run("0004_alphazero")
+    cfg = run.compose_config(["+experiment=smoke", "final_games=7"])
+    cfg = cfg.model_copy(
+        update={
+            "arena": cfg.arena.model_copy(
+                update={"games": 999, "opponent_every": {"random": 5}}
+            )
+        }
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_run_arena(
+        backend: object,
+        net: object,
+        arena_cfg: object,
+        *,
+        seed: int,
+        round_index: int,
+        net_opponents: object = None,
+    ) -> dict[str, float]:
+        captured["arena_cfg"] = arena_cfg
+        captured["seed"] = seed
+        captured["net_opponents"] = net_opponents
+        return {"arena_elo": 10.0, "arena_elo_se": 1.0, "arena_winrate": 0.5}
+
+    monkeypatch.setattr(run, "run_arena", fake_run_arena)
+    net_opponents = {"az0": (object(), -100.0, 5)}  # every=5, to be neutralized
+
+    metrics = run.run_final_gauntlet(object(), object(), cfg, net_opponents)
+
+    arena_cfg = captured["arena_cfg"]
+    assert arena_cfg.games == 7
+    assert arena_cfg.opponent_every == {}
+    assert captured["seed"] == cfg.seed + 99
+    got_opponents = captured["net_opponents"]
+    assert got_opponents["az0"][2] == 1
+    assert metrics == {"arena_elo": 10.0, "arena_elo_se": 1.0, "arena_winrate": 0.5}
+
+
+def test_0004_gauntlet_verdict_elo_boundary() -> None:
+    # pass iff arena_elo - 2*arena_elo_se >= gate_elo -- both sides of the
+    # 2-sigma boundary.
+    run = load_run("0004_alphazero")
+    gate = 35.0
+    assert (
+        run.gauntlet_verdict({"arena_elo": 45.0, "arena_elo_se": 5.0}, gate) == "pass"
+    )
+    assert (
+        run.gauntlet_verdict({"arena_elo": 44.9, "arena_elo_se": 5.0}, gate) == "fail"
+    )

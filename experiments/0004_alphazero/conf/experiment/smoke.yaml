@@ -5,6 +5,7 @@ net:
   depth: 1
 n_iterations: 1
 checkpoint_every: 1
+final_games: 4  # the final gauntlet defaults to 400; keep the smoke tiny
 search:
   num_simulations: 4
   max_considered: 4

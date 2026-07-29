@@ -19,6 +19,8 @@ n_iterations: 20
 checkpoint_every: 5
 resume_from: ""
 gate_winrate: 0.55
+gate_elo: 35.0
+final_games: 400
 
 wandb:
   mode: online

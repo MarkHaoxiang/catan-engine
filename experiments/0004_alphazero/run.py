@@ -15,7 +15,7 @@ block) so ``start_run`` keeps owning the run dir + manifest.
 """
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import hydra
 import jax
@@ -27,6 +27,7 @@ from settlrl_learn import save_az_params
 from settlrl_learn.experiment import Config, Run, start_run
 from settlrl_learn.training import (
     ArenaConfig,
+    Backend,
     EvalConfig,
     GNNBackend,
     LearnConfig,
@@ -37,8 +38,8 @@ from settlrl_learn.training import (
     SelfPlayConfig,
     TeacherConfig,
     ValueBlendConfig,
-    arena,
     learn,
+    run_arena,
 )
 
 
@@ -99,7 +100,9 @@ class AlphaZeroConfig(Config):
     n_iterations: int = 20
     checkpoint_every: int = 5
     resume_from: str = ""  # prior run dir to continue bit-exactly (its runstate.eqx)
-    gate_winrate: float = 0.55  # pass iff the final net clears this vs lookahead
+    gate_winrate: float = 0.55  # legacy gate vs lookahead; reported, no longer gates
+    gate_elo: float = 35.0  # pass iff gauntlet's arena_elo - 2*arena_elo_se clears this
+    final_games: int = 400  # games/rung in the end-of-run gauntlet (vs arena.games)
     net: NetConfig = Field(default_factory=NetConfig)
     wandb: WandbConfig = Field(default_factory=WandbConfig)
     bench: BenchConfig = Field(default_factory=BenchConfig)
@@ -155,6 +158,40 @@ def build_net_opponents(
     return out
 
 
+def run_final_gauntlet(
+    backend: Backend,
+    net: Any,
+    cfg: AlphaZeroConfig,
+    net_opponents: dict[str, tuple[BeliefSpec, float, int]],
+) -> dict[str, float]:
+    """The end-of-run verdict gauntlet: every configured opponent (the registry
+    ones plus ``net_opponents``) at ``cfg.final_games`` games each, with every
+    per-round schedule neutralized so nothing is skipped (``opponent_every={}``,
+    every net opponent's ``every`` forced to 1). With every schedule's period 1,
+    ``round_index % 1 == 0`` unconditionally, so ``round_index`` plays no role;
+    0 is passed for clarity. Seeded off ``cfg.seed + 99`` -- the legacy final-arena
+    base -- so the gauntlet's games stay disjoint from the in-loop training arenas."""
+    final_arena_cfg = ArenaConfig(
+        **cfg.arena.model_dump(exclude={"net_opponents"})
+    ).model_copy(update={"games": cfg.final_games, "opponent_every": {}})
+    final_opponents = {
+        name: (spec, elo, 1) for name, (spec, elo, _every) in net_opponents.items()
+    }
+    return run_arena(
+        backend, net, final_arena_cfg, seed=cfg.seed + 99, round_index=0,
+        net_opponents=final_opponents,
+    )  # fmt: skip
+
+
+def gauntlet_verdict(metrics: dict[str, float], gate_elo: float) -> str:
+    """``pass`` iff the gauntlet's lower 2-sigma Elo bound clears ``gate_elo``."""
+    return (
+        "pass"
+        if metrics["arena_elo"] - 2 * metrics["arena_elo_se"] >= gate_elo
+        else "fail"
+    )
+
+
 def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     """The board-GNN value+policy net (experiment 0003's recommendation) in the
     training loop, with the setup phase delegated to a fixed policy."""
@@ -207,12 +244,13 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             best = winrate
             eqx.tree_serialise_leaves(run.dir / "best.eqx", model)
 
+    net_opponents = build_net_opponents(cfg)
     try:
         model = learn(
             backend,
             cfg.to_learn_config(),
             teacher_value=heuristic_value if cfg.teacher.enabled else None,
-            net_opponents=build_net_opponents(cfg),
+            net_opponents=net_opponents,
             checkpoint_dir=run.dir,
             resume_from=resume,
             on_iter=on_iter,
@@ -221,15 +259,12 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     finally:
         wb.finish()
 
-    winrate = arena(
-        backend, model, n_games=cfg.arena.games, num_simulations=cfg.arena.sims,
-        batch_size=cfg.arena.batch, max_num_considered_actions=cfg.arena.considered,
-        seed=cfg.seed + 99,
-    ).winrate  # fmt: skip
-    verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
+    metrics = run_final_gauntlet(backend, model, cfg, net_opponents)
+    verdict = gauntlet_verdict(metrics, cfg.gate_elo)
     run.finish(
-        verdict, arena_winrate=winrate, best_arena_winrate=best, gate=cfg.gate_winrate
-    )
+        verdict, best_arena_winrate=best,
+        gate_elo=cfg.gate_elo, gate_winrate=cfg.gate_winrate, **metrics,
+    )  # fmt: skip
 
 
 def run_bench(run: Run, cfg: AlphaZeroConfig) -> None:
@@ -313,13 +348,14 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
             best = winrate
             save_az_params(run.dir / "best.npz", net)  # type: ignore[arg-type]
 
+    net_opponents = build_net_opponents(cfg)
     try:
         # learn writes the full-state checkpoint (run.dir/runstate.eqx) for
         # bit-exact resume; resume_from continues a prior run's checkpoint.
         final = learn(
             backend,
             cfg.to_learn_config(),
-            net_opponents=build_net_opponents(cfg),
+            net_opponents=net_opponents,
             checkpoint_dir=run.dir,
             resume_from=resume_from,
             on_iter=on_iter,
@@ -329,15 +365,12 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         wb.finish()
 
     save_az_params(run.dir / "params.npz", final)  # final net
-    winrate = arena(
-        backend, final, n_games=cfg.arena.games, num_simulations=cfg.arena.sims,
-        batch_size=cfg.arena.batch, max_num_considered_actions=cfg.arena.considered,
-        seed=cfg.seed + 99,
-    ).winrate  # fmt: skip
-    verdict = "pass" if winrate >= cfg.gate_winrate else "fail"
+    metrics = run_final_gauntlet(backend, final, cfg, net_opponents)
+    verdict = gauntlet_verdict(metrics, cfg.gate_elo)
     run.finish(
-        verdict, arena_winrate=winrate, best_arena_winrate=best, gate=cfg.gate_winrate
-    )
+        verdict, best_arena_winrate=best,
+        gate_elo=cfg.gate_elo, gate_winrate=cfg.gate_winrate, **metrics,
+    )  # fmt: skip
 
 
 def compose_config(overrides: list[str]) -> AlphaZeroConfig:
