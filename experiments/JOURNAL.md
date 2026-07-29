@@ -123,7 +123,13 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   `conf/arena/scale.yaml` (sims=24, considered=16) + `conf/search/scale.yaml`
   (chance_nodes=false, dev_chance=true, ordered=false) — recorded verbatim in
   the run's `result.json` (`search_semantics`) alongside the fitted ratings
-  and matrix. A differently-configured arena (different sims/considered, or
-  chance_nodes/dev_chance/ordered flipped) needs its own calibration; these
-  anchors should not be reused there. Run:
+  and matrix — plus az0_gnn96x4's setup opener (`setup_depth=1`,
+  `setup_temperature=2.0`, `setup_beam=4`, GNNBackend's own defaults): pinned
+  as constants (`0004_alphazero/run.py::NET_OPPONENT_SETUP_*`,
+  `0001_bench_smoke/calibrate.py::AZ0_SETUP_*`) rather than read off a run's
+  `cfg.net.setup_*`, so a frozen anchor keeps frozen semantics regardless of
+  what any given run configures for its own net. A differently-configured
+  arena (different sims/considered, chance_nodes/
+  dev_chance/ordered flipped, or a different az0 setup opener) needs its own
+  calibration; these anchors should not be reused there. Run:
   runs/0001_bench_smoke/2026-07-29T034807Z.

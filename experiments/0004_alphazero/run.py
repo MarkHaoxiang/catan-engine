@@ -127,12 +127,22 @@ class AlphaZeroConfig(Config):
         )  # fmt: skip
 
 
+# az0_gnn96x4's -58 Elo (JOURNAL.md's 2026-07-29 scale-reset entry) was fit
+# playing the checkpoint's setup phase at GNNBackend's own defaults -- a frozen
+# anchor must keep frozen semantics, so this pins those values rather than
+# reading this run's cfg.net.setup_* (which varies per run/sweep).
+NET_OPPONENT_SETUP_DEPTH = 1
+NET_OPPONENT_SETUP_TEMPERATURE = 2.0
+NET_OPPONENT_SETUP_BEAM = 4
+
+
 def build_net_opponents(
     cfg: AlphaZeroConfig,
 ) -> dict[str, tuple[BeliefSpec, float, int]]:
     """The specs `learn` seats for ``cfg.arena.net_opponents``: each named anchor
     loaded from ``anchors/`` and played by its own GNN search at the arena's
-    budget, under this run's setup opener and search semantics."""
+    budget, under the calibration's frozen setup opener (``NET_OPPONENT_SETUP_*``)
+    and this run's search semantics."""
     # same-dir sibling module (see run_bench's note on sys.path).
     from anchors import load_anchor
 
@@ -141,8 +151,9 @@ def build_net_opponents(
     for name, opp in cfg.arena.net_opponents.items():
         net, netcfg = load_anchor(name)
         backend = GNNBackend(
-            netcfg, setup_depth=cfg.net.setup_depth,
-            setup_temperature=cfg.net.setup_temperature, setup_beam=cfg.net.setup_beam,
+            netcfg, setup_depth=NET_OPPONENT_SETUP_DEPTH,
+            setup_temperature=NET_OPPONENT_SETUP_TEMPERATURE,
+            setup_beam=NET_OPPONENT_SETUP_BEAM,
             chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
         )  # fmt: skip
         agent = backend.play_agent(
@@ -184,7 +195,17 @@ def run_final_gauntlet(
 
 
 def gauntlet_verdict(metrics: dict[str, float], gate_elo: float) -> str:
-    """``pass`` iff the gauntlet's lower 2-sigma Elo bound clears ``gate_elo``."""
+    """``pass`` iff the gauntlet's lower 2-sigma Elo bound clears ``gate_elo``.
+
+    Raises ``ValueError`` if ``run_final_gauntlet`` produced no ``arena_elo``
+    (every configured opponent was skipped, or none carried an anchor Elo) --
+    a misconfigured gauntlet, not a legitimate zero score."""
+    if "arena_elo" not in metrics:
+        raise ValueError(
+            "gauntlet produced no arena_elo -- check cfg.arena.opponents / "
+            "arena.net_opponents are non-empty and every opponent has an "
+            "anchor_elos entry (or is a net_opponent, which carries its own)"
+        )
     return (
         "pass"
         if metrics["arena_elo"] - 2 * metrics["arena_elo_se"] >= gate_elo

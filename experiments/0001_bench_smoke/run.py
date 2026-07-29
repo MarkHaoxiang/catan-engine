@@ -26,7 +26,6 @@ from calibrate import (
     AZ0_NAME,
     FIXED_ELOS,
     PairResult,
-    Spec,
     az0_spec,
     joint_fit,
     joint_fit_se,
@@ -37,6 +36,7 @@ from calibrate import (
 from settlrl_agents import POLICIES
 from settlrl_agents.cli import bench
 from settlrl_learn.experiment import Config, Run, start_run
+from settlrl_learn.training import OpponentSpec
 
 
 class BenchSmokeConfig(Config):
@@ -74,7 +74,7 @@ class CalibrateConfig(Config):
     batch_size: int = 64
 
 
-def _spec(name: str, semantics: dict[str, object]) -> Spec:
+def _spec(name: str, semantics: dict[str, object]) -> OpponentSpec:
     if name == AZ0_NAME:
         return az0_spec(
             sims=int(semantics["sims"]),  # type: ignore[call-overload]

@@ -23,18 +23,24 @@ from pathlib import Path
 from typing import NamedTuple
 
 from omegaconf import OmegaConf
-from settlrl_agents import BeliefSpec, ObservationSpec, StatefulSpec
+from settlrl_agents import BeliefSpec
 from settlrl_agents.evaluate import evaluate
+from settlrl_learn.training import OpponentSpec
 from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
-
-Spec = ObservationSpec | BeliefSpec | StatefulSpec
-"""Any seatable agent spec (a ``POLICIES`` entry or a built spec like az0's)."""
 
 RUNGS: tuple[str, ...] = ("random", "greedy", "lookahead", "mcts")
 """The ``POLICIES`` rungs in the round-robin (registry names)."""
 
 AZ0_NAME = "az0_gnn96x4"
 """The frozen checkpoint's anchor artifact name (``0004_alphazero/anchors/``)."""
+
+# Mirrors 0004_alphazero/run.py::NET_OPPONENT_SETUP_* (not imported -- that
+# module is also named "run.py" in this framework, so a bare `from run import
+# ...` would resolve to *this directory's* run.py instead). Both call sites
+# must move together; a divergence would silently miscalibrate az0's Elo.
+AZ0_SETUP_DEPTH = 1
+AZ0_SETUP_TEMPERATURE = 2.0
+AZ0_SETUP_BEAM = 4
 
 FIXED_ELOS: dict[str, float] = {"lookahead": 0.0}
 """The scale's origin: ``anchored_elo``'s convention (heuristic lookahead = 0)."""
@@ -109,9 +115,13 @@ def az0_spec(
     from settlrl_learn.training import GNNBackend
 
     net, netcfg = load_anchor(AZ0_NAME)
+    # explicit, not default-coincidence: this calibration IS what pinned
+    # 0004_alphazero's NET_OPPONENT_SETUP_* (see the module-level comment above).
     backend = GNNBackend(
-        netcfg, chance_nodes=chance_nodes, dev_chance=dev_chance, ordered=ordered
-    )
+        netcfg, setup_depth=AZ0_SETUP_DEPTH,
+        setup_temperature=AZ0_SETUP_TEMPERATURE, setup_beam=AZ0_SETUP_BEAM,
+        chance_nodes=chance_nodes, dev_chance=dev_chance, ordered=ordered,
+    )  # fmt: skip
     agent = backend.play_agent(
         net, num_simulations=sims, max_num_considered_actions=considered
     )
@@ -120,9 +130,9 @@ def az0_spec(
 
 def play_pair(
     a_name: str,
-    a_spec: Spec,
+    a_spec: OpponentSpec,
     b_name: str,
-    b_spec: Spec,
+    b_spec: OpponentSpec,
     *,
     n_games: int,
     seed: int,

@@ -38,7 +38,11 @@ lookahead pinned at 0. 10 unordered pairs, seat-swapped 2p, n=4238 games total
 (heuristic pairs n≈600-620, pairs touching mcts/az0 n≈300-370); search
 semantics for the az0 pairs pinned at `conf/arena/scale.yaml` +
 `conf/search/scale.yaml`'s settings (sims=24, considered=16,
-chance_nodes=false, dev_chance=true, ordered=false).
+chance_nodes=false, dev_chance=true, ordered=false), plus az0_gnn96x4's setup
+opener (`setup_depth=1`, `setup_temperature=2.0`, `setup_beam=4` — GNNBackend's
+own defaults, pinned as constants in both `calibrate.py::AZ0_SETUP_*` and
+`0004_alphazero/run.py::NET_OPPONENT_SETUP_*` rather than read off a run's
+`cfg.net.setup_*`).
 
 Fitted (Fisher SE): random −1115.2 ± 71.1, greedy −230.9 ± 11.7, lookahead
 0.0 (fixed), mcts +38.2 ± 11.7, az0_gnn96x4 −57.9 ± 12.0. All four sanity

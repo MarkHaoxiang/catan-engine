@@ -985,13 +985,13 @@ def test_run_arena_uses_real_counts_for_elo_and_reports_se(monkeypatch: Any) -> 
     cfg = ArenaConfig(
         games=40,
         opponents=["lookahead", "random"],
-        anchor_elos={"lookahead": 0.0, "random": -800.0},
+        anchor_elos={"lookahead": 0.0, "random": -1115.0},
     )
     metrics = run_arena(MLPBackend((16,)), object(), cfg, seed=0, round_index=1)
-    real_inputs = [(0.0, 30.0, 50), (-800.0, 10.0, 20)]
+    real_inputs = [(0.0, 30.0, 50), (-1115.0, 10.0, 20)]
     nominal_inputs = [
         (0.0, 0.6 * 40, 40),
-        (-800.0, 0.5 * 40, 40),
+        (-1115.0, 0.5 * 40, 40),
     ]  # the old, buggy feed
     assert metrics["arena_winrate"] == results["lookahead"].winrate
     assert metrics["arena_elo"] == anchored_elo(real_inputs)
@@ -1017,7 +1017,7 @@ def test_run_arena_opponent_every_skips_off_rounds(monkeypatch: Any) -> None:
     cfg = ArenaConfig(
         games=40,
         opponents=["lookahead", "random"],
-        anchor_elos={"lookahead": 0.0, "random": -800.0},
+        anchor_elos={"lookahead": 0.0, "random": -1115.0},
         opponent_every={"random": 5},
     )
     backend = MLPBackend((16,))
@@ -1115,7 +1115,7 @@ def test_run_arena_net_opponent_every_and_registry_seeds(monkeypatch: Any) -> No
     cfg = ArenaConfig(
         games=40,
         opponents=["lookahead", "random"],
-        anchor_elos={"lookahead": 0.0, "random": -800.0},
+        anchor_elos={"lookahead": 0.0, "random": -1115.0},
     )
     backend = MLPBackend((16,))
     net_opponents = {"az0": (_dummy_spec(), -100.0, 3), "az1": (_dummy_spec(), 50.0, 1)}
@@ -1127,7 +1127,7 @@ def test_run_arena_net_opponent_every_and_registry_seeds(monkeypatch: Any) -> No
     assert net_calls == [50_000 + 10_000]  # az0 skipped (round 1 % 3), az1 played
     assert "arena_vs_az0" not in metrics
     assert metrics["arena_elo"] == anchored_elo(
-        [(0.0, 30.0, 50), (-800.0, 30.0, 50), (50.0, 24.0, 40)]
+        [(0.0, 30.0, 50), (-1115.0, 30.0, 50), (50.0, 24.0, 40)]
     )
 
     reg_seeds.clear()
@@ -1144,7 +1144,7 @@ def test_run_arena_net_opponent_every_and_registry_seeds(monkeypatch: Any) -> No
     net_calls.clear()
     base = run_arena(backend, object(), cfg, seed=0, round_index=3)
     assert reg_seeds == [0, 10_000] and net_calls == []
-    assert base["arena_elo"] == anchored_elo([(0.0, 30.0, 50), (-800.0, 30.0, 50)])
+    assert base["arena_elo"] == anchored_elo([(0.0, 30.0, 50), (-1115.0, 30.0, 50)])
 
 
 def test_self_play_no_pcr_marks_all_full() -> None:

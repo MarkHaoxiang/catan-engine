@@ -13,6 +13,9 @@ net:
 # nano ~1h: quick diagnostic. ~36 iters (8 teacher + ~28 net); arena fires 3x.
 n_iterations: 36
 checkpoint_every: 10
+# the default final_games (400) gauntlet costs ~30min alone -- half the nano
+# budget for a one-off diagnostic tier; 60 keeps it a small tail instead.
+final_games: 60
 replay:
   buffer_max: 50000
 value_blend:

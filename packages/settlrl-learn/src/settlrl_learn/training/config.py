@@ -112,7 +112,10 @@ class ArenaConfig(_Group):
     ``anchor_elos`` pins each anchor opponent's Elo on a fixed scale (``lookahead``
     = the heuristic gate at 0; ``random`` well below); the net's ``arena_elo`` is
     the MLE on that scale (:mod:`settlrl_learn.training.elo`). Anchors must stay
-    frozen for a run -- changing them silently shifts every historical number."""
+    frozen for a run -- changing them silently shifts every historical number.
+    The defaults are calibration-scoped: valid only under the search settings
+    (sims/considered/chance_nodes/dev_chance/ordered) the calibration ran with
+    (JOURNAL.md scale-reset entry, 2026-07-29)."""
 
     games: int = 0
     every: int = 1
@@ -121,7 +124,7 @@ class ArenaConfig(_Group):
     considered: int = 16
     opponents: list[str] = Field(default_factory=lambda: ["lookahead", "random"])
     anchor_elos: dict[str, float] = Field(
-        default_factory=lambda: {"lookahead": 0.0, "random": -800.0}
+        default_factory=lambda: {"lookahead": 0.0, "random": -1115.0}
     )
     opponent_every: dict[str, int] = Field(default_factory=dict)
     """Opponent name -> play it only every Nth arena round (absent, or 1, plays
