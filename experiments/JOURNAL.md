@@ -155,3 +155,26 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   dev_chance/ordered flipped, or a different az0 setup opener) needs its own
   calibration; these anchors should not be reused there. Run:
   runs/0001_bench_smoke/2026-07-29T034807Z.
+- 0004 scale2_long — **pass, first Stage-1 gate clear** (2026-07-30). The
+  scale2 recipe (persistent lanes, `selfplay.batch=512`, PCR
+  `pcr_full_prob=0.25`/`pcr_fast_sims=16`, `temperature_moves=30` anneal, gnn
+  96x4, v1 features) run to 2500 iterations, bit-exactly resumed at iteration
+  1710 across two segments — runs/0004_alphazero/2026-07-29T122854Z (iters
+  0-1710, git 57a4e08) and runs/0004_alphazero/2026-07-30T094945Z
+  (`resume_from` the first dir, iters 1710-2500, git 57a4e08) — clears the
+  gate: final gauntlet `arena_elo` 109.857 ± 12.867 SE (lower bound +84.1
+  vs. the +35 gate), `arena_winrate` 0.6264 vs. lookahead (gate 0.55), 1.0
+  vs. random, 0.7530 vs. the frozen az0 anchor, `best_arena_winrate` 0.6694
+  (400-game final_games gauntlet, `runs/.../result.json`). Periodic in-loop
+  `arena_elo` trajectory across both segments: −211.8 @ iter 149 →
+  −75.4 @ 299 → −61.7 @ 449 → +19.1 @ 599 → +57.7 @ 899 → +76.5 @ 1349 →
+  +107.6 @ 1649 → +121.7 @ 1799 → +113.6 @ 1949 → +130.9 @ 2099 →
+  +99.3 @ 2399 → +109.857 (final gauntlet). **Falsifies the earlier
+  "plateau" reading**: the throughput-wave verdict (above) left the
+  plateau question open for "a scale2-based long run" to re-test; this run
+  is that re-test, and the net climbs ~340 Elo points from its iter-149
+  trough to the final gate pass with no sign of saturating — the earlier
+  short runs read a still-cold net, not a ceiling. Under-scaling, not a
+  leaf/value ceiling, was the cause. Anchor minted: `az1_gnn96x4`
+  (feature_version=1, gauntlet elo 109.86 ± 12.87) added as an arena rung
+  in `conf/arena/scale.yaml`.

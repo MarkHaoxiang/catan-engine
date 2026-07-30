@@ -1,0 +1,45 @@
+{
+  "preset": "gn_global",
+  "width": 96,
+  "layers": 4,
+  "head_depth": 2,
+  "feature_version": 1,
+  "incidence": false,
+  "source_run": "runs/0004_alphazero/2026-07-30T094945Z",
+  "source_argv": "+experiment=scale2_long resume_from=runs/0004_alphazero/2026-07-29T122854Z",
+  "provenance": {
+    "note": "scale2_long, 2500 iterations, bit-exactly resumed at iteration 1710 across two segments",
+    "segment_1": {
+      "run": "runs/0004_alphazero/2026-07-29T122854Z",
+      "argv": "+experiment=scale2_long",
+      "iterations": "0-1710",
+      "git_commit": "57a4e082c5f5788bf3a95aa70797d74a5b9278c0"
+    },
+    "segment_2": {
+      "run": "runs/0004_alphazero/2026-07-30T094945Z",
+      "argv": "+experiment=scale2_long resume_from=runs/0004_alphazero/2026-07-29T122854Z",
+      "iterations": "1710-2500",
+      "git_commit": "57a4e082c5f5788bf3a95aa70797d74a5b9278c0"
+    }
+  },
+  "gauntlet": {
+    "verdict": "pass",
+    "arena_elo": 109.85732508133322,
+    "arena_elo_se": 12.867130152741389,
+    "arena_winrate_vs_lookahead": 0.6264236902050114,
+    "arena_vs_random": 1.0,
+    "arena_vs_az0_gnn96x4": 0.7530266343825666,
+    "best_arena_winrate": 0.6693548387096774,
+    "gate_elo": 35.0,
+    "gate_winrate": 0.55,
+    "final_games": 400
+  },
+  "search_semantics": {
+    "note": "arena/search settings this gauntlet elo is only valid under -- same scope az0's calibration recorded (experiments/JOURNAL.md's 2026-07-29 scale-reset entry); a differently-configured arena needs its own calibration.",
+    "sims": 24,
+    "considered": 16,
+    "chance_nodes": false,
+    "dev_chance": true,
+    "ordered": false
+  }
+}

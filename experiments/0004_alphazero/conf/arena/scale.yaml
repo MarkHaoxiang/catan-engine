@@ -22,3 +22,10 @@ net_opponents:
   az0_gnn96x4:
     elo: -58.0
     every: 1
+  # scale2_long's finished checkpoint (2500 iters, first Stage-1 gate pass):
+  # elo is its own final-gauntlet reading, gauntlet-calibrated 2026-07-30
+  # at this same arena/search semantics scope (sims=24, considered=16,
+  # chance_nodes=false, dev_chance=true, ordered=false) -- see JOURNAL.md.
+  az1_gnn96x4:
+    elo: 109.86
+    every: 1
