@@ -101,26 +101,37 @@ class _GNNPrior:
 
     model: BoardGNN
     het: bool
+    version: int = 1
+
+    def _sample(
+        self, layout: BoardLayout, state: BoardState, player: IntScalar
+    ) -> Sample:
+        return board_sample(
+            layout, state, player, with_tiles=self.het, version=self.version
+        )
 
     def __call__(
         self, layout: BoardLayout, state: BoardState, player: IntScalar
     ) -> Float[Array, f"flat={N_FLAT}"]:
-        return self.model(board_sample(layout, state, player, with_tiles=self.het))[1]
+        return self.model(self._sample(layout, state, player))[1]
 
     def with_value(
         self, layout: BoardLayout, state: BoardState, player: IntScalar
     ) -> tuple[Value, Float[Array, f"flat={N_FLAT}"]]:
-        return self.model(board_sample(layout, state, player, with_tiles=self.het))
+        return self.model(self._sample(layout, state, player))
 
 
 def gnn_seams(model: BoardGNN) -> tuple[ValueFunction, ValuePrior]:
     """Adapt the GNN onto the search seams as ``(value, prior)``; both run the
     board-graph forward. Build the search with ``value_scale=2``. Tiles are
     featurized only for a heterogeneous net (else the trunk ignores them, so we
-    keep them out of the graph)."""
+    keep them out of the graph); the featurization version is the net's own."""
     het = model.trunk.tile_enc is not None
+    version = model.trunk.cfg.feature_version
 
     def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
-        return model(board_sample(layout, state, player, with_tiles=het))[0]
+        return model(
+            board_sample(layout, state, player, with_tiles=het, version=version)
+        )[0]
 
-    return value, _GNNPrior(model, het)
+    return value, _GNNPrior(model, het, version)

@@ -24,7 +24,10 @@ Levers (``GraphNetConfig``):
 - ``jk`` -- jumping-knowledge: pool every layer's node state, not just the last
   (multi-scale, dodges over-smoothing);
 - ``layers`` / ``width`` / ``heads`` -- depth/capacity. Non-recurrent: each layer
-  has its own weights.
+  has its own weights;
+- ``feature_version`` -- which :mod:`settlrl_learn.nn.graph` feature set the trunk
+  reads (it sizes the encoders, and every ``board_sample`` feeding this net must
+  pass the same version).
 """
 
 from __future__ import annotations
@@ -54,6 +57,7 @@ class GraphNetConfig(NamedTuple):
     readout: str = "multi"  # "mean" | "sum" | "multi"
     jk: bool = False
     hetero: bool = False  # add HEX/TILE nodes + vertex<->hex message passing
+    feature_version: int = 1  # graph.FEATURE_VERSIONS: the board featurization
 
 
 def _aggr(messages: Float[Array, "e w"]) -> Float[Array, "v w"]:
@@ -236,8 +240,9 @@ class GraphTrunk(eqx.Module):
     cfg: GraphNetConfig = eqx.field(static=True)
 
     def __init__(self, key: KeyScalar, cfg: GraphNetConfig) -> None:
-        from settlrl_learn.nn.graph import EDGE_DIM, GLOBAL_DIM, NODE_DIM, TILE_DIM
+        from settlrl_learn.nn.graph import dims
 
+        NODE_DIM, EDGE_DIM, GLOBAL_DIM, TILE_DIM = dims(cfg.feature_version)
         w = cfg.width
         # 3 encoder keys non-hetero (preserves the pre-hetero init exactly), +1
         # for the tile encoder when hetero; the rest seed the layers.

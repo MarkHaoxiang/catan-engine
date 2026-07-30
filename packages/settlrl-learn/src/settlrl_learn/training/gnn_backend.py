@@ -28,13 +28,10 @@ from settlrl_search.rows import ROW_TYPE as _ROW_TYPE
 
 from settlrl_learn.nn.board_gnn import BoardGNN, gnn_seams
 from settlrl_learn.nn.graph import (
-    EDGE_DIM,
-    GLOBAL_DIM,
     N_DIR_EDGES,
-    NODE_DIM,
-    TILE_DIM,
     Sample,
     board_sample,
+    dims,
 )
 from settlrl_learn.nn.graphnet import GraphNetConfig
 from settlrl_learn.training.backend import Metrics, StepFn
@@ -223,7 +220,13 @@ class GNNBackend:
     ) -> dict[str, Array]:
         # Tiles are featurized only for a heterogeneous net; else a constant zero,
         # so the non-hetero forward graph has no tile ops.
-        s = board_sample(layout, state, player, with_tiles=self.cfg.hetero)
+        s = board_sample(
+            layout,
+            state,
+            player,
+            with_tiles=self.cfg.hetero,
+            version=self.cfg.feature_version,
+        )
         return {"nodes": s.nodes, "edges": s.edges, "glob": s.glob, "tiles": s.tiles}
 
     def to_item(self, samples: Samples) -> GNNItem:
@@ -239,11 +242,12 @@ class GNNBackend:
         )
 
     def empty_item(self) -> GNNItem:
+        node_dim, edge_dim, global_dim, tile_dim = dims(self.cfg.feature_version)
         return GNNItem(
-            jnp.zeros((N_VERTICES, NODE_DIM), jnp.float32),
-            jnp.zeros((N_DIR_EDGES, EDGE_DIM), jnp.float32),
-            jnp.zeros((GLOBAL_DIM,), jnp.float32),
-            jnp.zeros((N_TILES, TILE_DIM), jnp.float32),
+            jnp.zeros((N_VERTICES, node_dim), jnp.float32),
+            jnp.zeros((N_DIR_EDGES, edge_dim), jnp.float32),
+            jnp.zeros((global_dim,), jnp.float32),
+            jnp.zeros((N_TILES, tile_dim), jnp.float32),
             jnp.zeros((N_FLAT,), jnp.float32),
             jnp.zeros((N_FLAT,), jnp.float32),
             jnp.float32(0.0),

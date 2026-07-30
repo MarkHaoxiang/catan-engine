@@ -3,6 +3,7 @@
   "width": 96,
   "layers": 4,
   "head_depth": 2,
+  "feature_version": 1,
   "source_run": "runs/0004_alphazero/2026-06-23T121706Z",
   "source_argv": "+experiment=gnn_overnight n_iterations=300 arena.every=10",
   "best_arena_winrate_vs_lookahead": 0.361

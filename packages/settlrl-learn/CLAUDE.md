@@ -48,11 +48,31 @@ uses them.
     features) and the vertex↔hex incidence (`VT_V`/`VT_T`) feed the *heterogeneous*
     trunk; `board_sample(with_tiles=False)` skips them (a constant-zero `tiles`)
     for a non-hetero net, keeping its graph free of tile ops.
+    **Versioned** (`board_sample(version=)`, `FEATURE_VERSIONS`, widths from
+    `dims(version)`; `GraphNetConfig.feature_version` is what every consumer
+    threads, and a frozen anchor pins its own in its sidecar). Version 1 is the
+    original, kept byte-exact (digest-pinned in `tests/test_architectures.py`) —
+    the az0 anchor and every v1 checkpoint read exactly those bytes.
+    **Version 2** closes the blindness the 2026-07-30 correctness audit
+    demonstrated byte-for-byte: v1's globals carry hand/dev *sizes* only, so
+    "2 wheat + 3 ore" vs "5 wool" (and 2 knights vs 2 monopolies) featurized
+    identically — the net could not see what it can afford or play. v2 appends
+    the perspective player's per-resource hand, per-type dev hand, `free_roads`
+    (masked by "my turn" — the engine stores it per *game*), the Longest Road
+    length split own / opponent, and the pending discard; and it puts the
+    per-vertex production term on the same `pips/5` scale as the per-hex features
+    (v1 left node pips raw). Every count is divided by a "large but ordinary"
+    value for that quantity (the divisors carry their reasoning at the constant)
+    because nothing normalises `glob`. The Longest Road entries read the *award
+    holder's* stored length rather than re-running `longest_road_length` per
+    player: the featurizer runs on every search leaf, and that DFS is what the
+    engine gates hardest — so a length below the 5-road award threshold is
+    invisible by design (road *counts* are in v1's per-player block).
     **Gotcha:** `tile_number` reaches the net only via `tile_pips` (`6 − |7 − n|`),
     a many-to-one collapse (6≡8, 5≡9, 4≡10, 3≡11, 2≡12) — number identity and
     same-number income correlation (e.g. two 6s vs. a 6 and an 8) are
-    unrepresentable in these v1 features. Fix vehicle: a featurization-v2 pass
-    (not yet scheduled), not a patch here.
+    unrepresentable in either version's features so far; the fix vehicle is the
+    v2 incidence arm (`docs/superpowers/plans/2026-07-30-featurization-v2.md`).
   - `nn/architectures.py` — the equinox architectures over it (`mlp_engineered`
     / `mlp_flat` / `deepset` / `gnn`, via `make_model`); experiment 0003
     composes them. `deepset`/`gnn` are invariant under the board's symmetry

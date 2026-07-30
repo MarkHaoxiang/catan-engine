@@ -1,4 +1,5 @@
-"""Symmetry contracts for the board architectures.
+"""Symmetry contracts for the board architectures, and the featurization-version
+contracts (bottom of the file).
 
 Two symmetries leave a position's *meaning* unchanged, so a sound representation
 must score it identically:
@@ -12,6 +13,8 @@ must score it identically:
 
 from __future__ import annotations
 
+import hashlib
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -23,8 +26,11 @@ from _symmetry import (
     relabel_players,
 )
 from settlrl_engine.board import Board
+from settlrl_engine.board.dev_cards import DevCard
+from settlrl_engine.board.state import BoardState
 from settlrl_engine.env import N_FLAT, ActionType, BatchedSettlrlEnv
 from settlrl_learn.features import features
+from settlrl_learn.nn import graph
 from settlrl_learn.nn.architectures import DeepSetModel, GNNModel, MLPModel
 from settlrl_learn.nn.board_gnn import BoardGNN
 from settlrl_learn.nn.graph import Sample, board_sample
@@ -98,22 +104,35 @@ def test_board_symmetry_leaves_structured_models_invariant() -> None:
 
 
 @pytest.mark.parametrize(
-    "preset", ["gn_multi", "gn_graphnorm", "gn_gat", "gn_full", "gn_hetero"]
+    ("preset", "version"),
+    [
+        ("gn_multi", 1),
+        ("gn_graphnorm", 1),
+        ("gn_gat", 1),
+        ("gn_full", 1),
+        ("gn_hetero", 1),
+        ("gn_global", 2),
+        ("gn_hetero", 2),
+    ],
 )
-def test_graphnet_presets_are_invariant(preset: str) -> None:
+def test_graphnet_presets_are_invariant(preset: str, version: int) -> None:
     # The configurable GraphNet keeps both invariances across every lever
     # (attention, GraphNorm spanning the node axis, the global node, JK) -- it
     # uses only symmetric aggregations and relative features, no absolute PE.
     layout, state = _mid_game(4)
-    cfg = PRESETS[preset]._replace(width=8, layers=2, head_depth=1)
+    cfg = PRESETS[preset]._replace(
+        width=8, layers=2, head_depth=1, feature_version=version
+    )
     model = GraphNet(jax.random.key(0), out_dim=_OUT, cfg=cfg)
-    base = np.asarray(model(board_sample(layout, state, jnp.int32(0))))
+    base = np.asarray(model(board_sample(layout, state, jnp.int32(0), version=version)))
     for sym in board_symmetries():
         l2, s2 = apply_symmetry(layout, state, sym)
-        rot = np.asarray(model(board_sample(l2, s2, jnp.int32(0))))
+        rot = np.asarray(model(board_sample(l2, s2, jnp.int32(0), version=version)))
         assert np.allclose(base, rot, atol=1e-3)
     perm = np.array([1, 2, 3, 0])
-    relabeled = board_sample(layout, relabel_players(state, perm), jnp.int32(perm[0]))
+    relabeled = board_sample(
+        layout, relabel_players(state, perm), jnp.int32(perm[0]), version=version
+    )
     assert np.allclose(base, np.asarray(model(relabeled)), atol=1e-3)
 
 
@@ -165,40 +184,48 @@ def test_flat_mlp_is_not_symmetry_invariant() -> None:
     assert moved > 1e-3
 
 
-def _aznet(preset: str = "gn_global") -> BoardGNN:
-    cfg = PRESETS[preset]._replace(width=16, layers=2, head_depth=1)
+def _aznet(preset: str = "gn_global", version: int = 1) -> BoardGNN:
+    cfg = PRESETS[preset]._replace(
+        width=16, layers=2, head_depth=1, feature_version=version
+    )
     return BoardGNN(jax.random.key(0), cfg)
 
 
+@pytest.mark.parametrize("version", [1, 2])
 @pytest.mark.parametrize("preset", ["gn_global", "gn_hetero"])
 def test_aznet_value_invariant_policy_equivariant_under_board_symmetry(
-    preset: str,
+    preset: str, version: int
 ) -> None:
     # The factored value+policy net: the value is invariant under a board
     # symmetry, and the policy is *equivariant* -- a settlement-at-v action maps
     # to settlement-at-(sigma v), road-at-e to road-at-(sigma e), robber-tile-t
     # to sigma(t) -- so policy(sigma . board)[action_permutation] == policy(board).
     layout, state = _mid_game(4)
-    net = _aznet(preset)
+    net = _aznet(preset, version)
     p = jnp.int32(0)
-    vv, pp = net(board_sample(layout, state, p))
+    vv, pp = net(board_sample(layout, state, p, version=version))
     v0, pol0 = np.asarray(vv), np.asarray(pp)
     for sym in board_symmetries():
         l2, s2 = apply_symmetry(layout, state, sym)
-        v, pol = net(board_sample(l2, s2, p))
+        v, pol = net(board_sample(l2, s2, p, version=version))
         assert np.allclose(np.asarray(v), v0, atol=1e-3)  # value invariant
         perm = action_permutation(sym)
         assert np.allclose(np.asarray(pol)[perm], pol0, atol=1e-3)  # policy equivariant
 
 
+@pytest.mark.parametrize("version", [1, 2])
 @pytest.mark.parametrize("preset", ["gn_global", "gn_hetero"])
-def test_aznet_value_and_policy_invariant_under_player_relabel(preset: str) -> None:
+def test_aznet_value_and_policy_invariant_under_player_relabel(
+    preset: str, version: int
+) -> None:
     layout, state = _mid_game(4)
-    net = _aznet(preset)
-    vv, pp = net(board_sample(layout, state, jnp.int32(0)))
+    net = _aznet(preset, version)
+    vv, pp = net(board_sample(layout, state, jnp.int32(0), version=version))
     v0, pol0 = np.asarray(vv), np.asarray(pp)
     perm = np.array([1, 2, 3, 0])
-    relabeled = board_sample(layout, relabel_players(state, perm), jnp.int32(perm[0]))
+    relabeled = board_sample(
+        layout, relabel_players(state, perm), jnp.int32(perm[0]), version=version
+    )
     v, pol = net(relabeled)
     assert np.allclose(np.asarray(v), v0, atol=1e-3)  # value invariant
     # Spatial (vertex/edge/tile, with the robber victim collapsed to no-steal vs
@@ -306,3 +333,144 @@ def test_gnn_loss_all_zero_train_policy_is_finite() -> None:
     )
     assert bool(jnp.isfinite(loss))
     assert float(aux["policy_loss"]) == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Featurization versions                                                       #
+# --------------------------------------------------------------------------- #
+
+# Captured from commit 57a4e08's `graph.py` (the only featurization there is what
+# `version=1` must reproduce): sha256 prefixes of each array of
+# `board_sample(_mid_game(n), p=0)`. Frozen constants, not a regenerable snapshot
+# -- the az0 anchor and every v1 checkpoint read exactly these bytes.
+_V1_GOLDEN = {
+    2: {
+        "nodes": ((54, 17), "6332d47fcfae01d5"),
+        "edges": ((144, 3), "983a355d434685a0"),
+        "glob": ((40,), "8d8914685524b298"),
+        "tiles": ((19, 9), "3654e9f9f523b789"),
+    },
+    4: {
+        "nodes": ((54, 17), "ffe99efcb7e74df4"),
+        "edges": ((144, 3), "658ca8b2746119cb"),
+        "glob": ((40,), "3b6acd18ca0ac383"),
+        "tiles": ((19, 9), "819be6de7b7bb3a6"),
+    },
+}
+
+
+def _flat(s: Sample) -> np.ndarray:
+    return np.concatenate([np.asarray(x).ravel() for x in s[:4]])
+
+
+@pytest.mark.parametrize("n_players", [2, 4])
+def test_v1_features_match_the_frozen_golden(n_players: int) -> None:
+    layout, state = _mid_game(n_players)
+    sample = board_sample(layout, state, jnp.int32(0), version=1)
+    for name, (shape, digest) in _V1_GOLDEN[n_players].items():
+        v = np.asarray(getattr(sample, name))
+        assert v.shape == shape and str(v.dtype) == "float32"
+        assert hashlib.sha256(v.tobytes()).hexdigest()[:16] == digest
+
+
+def test_feature_version_dims() -> None:
+    v1, v2 = graph.dims(1), graph.dims(2)
+    assert v1 == (graph.NODE_DIM, graph.EDGE_DIM, graph.GLOBAL_DIM, graph.TILE_DIM)
+    # v2 only widens the globals (own hand 5 + dev hand 5 + free roads, own and
+    # opponent longest-road length, pending discard); node/edge/tile keep theirs.
+    assert v2[2] - v1[2] == 14
+    assert (v2[0], v2[1], v2[3]) == (v1[0], v1[1], v1[3])
+    with pytest.raises(ValueError, match="unknown feature version"):
+        board_sample(*_mid_game(2), jnp.int32(0), version=3)
+
+
+def _hand_pair(
+    state: BoardState, a: list[int], b: list[int]
+) -> tuple[BoardState, BoardState]:
+    """Two states where players 0 and 1 hold ``a``/``b`` and then ``b``/``a``: the
+    per-resource totals (hence the bank) and both hand *sizes* are identical, so v1
+    -- which sees only sizes and the bank -- cannot tell them apart."""
+    rows = np.zeros_like(np.asarray(state.player_resources))
+    rows[0], rows[1] = a, b
+    swapped = rows.copy()
+    swapped[0], swapped[1] = b, a
+    return (
+        state._replace(player_resources=jnp.asarray(rows)),
+        state._replace(player_resources=jnp.asarray(swapped)),
+    )
+
+
+def test_v2_reveals_own_hand_composition() -> None:
+    # The 2026-07-30 audit's blindness probe, inverted. v1's globals carry hand
+    # *sizes* and the bank only, so "I hold 2 wheat + 3 ore" and "I hold 5 wool"
+    # (opponent holding the complement) featurize byte-identically -- the net could
+    # not see what it can afford. v2 must separate them.
+    layout, state = _mid_game(2)
+    p = jnp.int32(0)
+    for a, b in (
+        ([0, 2, 0, 0, 3], [5, 0, 0, 0, 0]),
+        ([2, 2, 1, 0, 0], [0, 0, 1, 2, 2]),
+    ):
+        s_a, s_b = _hand_pair(state, a, b)
+        v1 = [board_sample(layout, s, p, version=1) for s in (s_a, s_b)]
+        v2 = [board_sample(layout, s, p, version=2) for s in (s_a, s_b)]
+        assert np.array_equal(_flat(v1[0]), _flat(v1[1]))  # the proven blindness
+        assert not np.array_equal(_flat(v2[0]), _flat(v2[1]))  # ... now resolved
+
+
+def test_v2_reveals_dev_card_composition() -> None:
+    # Same probe on the dev hand: 2 knights vs 2 monopolies (neither a VP card, so
+    # the VP totals match too) are byte-identical in v1, which carries only the
+    # dev-card count.
+    layout, state = _mid_game(2)
+    p = jnp.int32(0)
+    hands = []
+    for kind in (int(DevCard.KNIGHT), int(DevCard.MONOPOLY)):
+        row = np.zeros_like(np.asarray(state.dev_hand))
+        row[0, kind] = 2
+        hands.append(state._replace(dev_hand=jnp.asarray(row)))
+    v1 = [board_sample(layout, s, p, version=1) for s in hands]
+    v2 = [board_sample(layout, s, p, version=2) for s in hands]
+    assert np.array_equal(_flat(v1[0]), _flat(v1[1]))
+    assert not np.array_equal(_flat(v2[0]), _flat(v2[1]))
+
+
+@pytest.mark.parametrize("field", ["free_roads", "pending_discard", "longest_road_len"])
+def test_v2_reveals_turn_state(field: str) -> None:
+    # Three more quantities v1 never encoded: the Road Building counter, the cards
+    # owed after a 7, and *how long* the Longest Road is (v1 has only the award
+    # holder flag, so the pair below fixes the holder and moves only the length).
+    layout, state = _mid_game(2)
+    p = jnp.int32(0)
+    state = state._replace(
+        current_player=jnp.uint8(0),  # free_roads belongs to the player on turn
+        longest_road_owner=jnp.uint8(0),
+    )
+    if field == "pending_discard":
+        lo, hi = (jnp.zeros_like(state.pending_discard), jnp.uint8([4, 0]))
+    else:
+        dtype = getattr(state, field).dtype
+        lo, hi = jnp.asarray(0, dtype), jnp.asarray(6, dtype)
+    pair = [state._replace(**{field: v}) for v in (lo, hi)]
+    v1 = [board_sample(layout, s, p, version=1) for s in pair]
+    v2 = [board_sample(layout, s, p, version=2) for s in pair]
+    assert np.array_equal(_flat(v1[0]), _flat(v1[1]))
+    assert not np.array_equal(_flat(v2[0]), _flat(v2[1]))
+
+
+def test_v2_features_are_symmetry_and_relabel_invariant() -> None:
+    # The v2 additions are all player-relative, so the featurization keeps both
+    # invariances exactly (the nets built on it are covered above).
+    layout, state = _mid_game(4)
+    base = board_sample(layout, state, jnp.int32(0), version=2)
+    for sym in board_symmetries():
+        l2, s2 = apply_symmetry(layout, state, sym)
+        rot = board_sample(l2, s2, jnp.int32(0), version=2)
+        assert np.allclose(np.asarray(base.glob), np.asarray(rot.glob), atol=1e-6)
+    for perm in (np.array([1, 0, 2, 3]), np.array([1, 2, 3, 0])):
+        for q in range(4):
+            mine = board_sample(layout, state, jnp.int32(q), version=2)
+            other = board_sample(
+                layout, relabel_players(state, perm), jnp.int32(perm[q]), version=2
+            )
+            assert np.allclose(_flat(mine), _flat(other), atol=1e-6)
