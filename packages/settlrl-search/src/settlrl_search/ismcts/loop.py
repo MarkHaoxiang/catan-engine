@@ -119,12 +119,18 @@ def make_tree(
     chance_nodes: bool = False,
     dev_chance: bool = True,
     ordered: bool = False,
+    fused_leaf: bool = True,
 ) -> TreeSearch:
     """Build one SO-ISMCTS tree (a :data:`TreeSearch` over :func:`_run`).
     ``prior`` (when given) is the *interior* node prior — a learned policy head;
     otherwise interior nodes use the tier table. The root prior is supplied per
     call (``root_logits``). The returned function is pure (the caller
     ``jit``/``vmap``s it).
+
+    A :class:`~settlrl_search.policy.ValuePrior` ``prior`` scores the leaf from
+    its own value head (one forward for both) unless ``fused_leaf`` is off, which
+    restores ``value`` as the leaf scorer — pass it for an *unpaired*
+    ``value``/``prior``.
 
     ``expected_rolls`` scores a dice-edge leaf by the exact 11-roll expectation
     (variance reduction at 11x the value-fn calls); False uses the single sampled
@@ -144,6 +150,7 @@ def make_tree(
         chance_nodes=chance_nodes,
         dev_chance=dev_chance,
         ordered=ordered,
+        fused_leaf=fused_leaf,
     )
     cfg = _Cfg(
         value=value,
@@ -156,6 +163,7 @@ def make_tree(
         chance_nodes=sc.chance_nodes,
         dev_chance=sc.dev_chance,
         ordered=sc.ordered,
+        fused_leaf=sc.fused_leaf,
         n_nodes=sc.num_simulations + 1,
         table=jnp.asarray(_considered_table(sc.max_considered, sc.num_simulations)),
     )

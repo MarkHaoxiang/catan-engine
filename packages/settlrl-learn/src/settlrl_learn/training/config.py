@@ -34,6 +34,7 @@ class SearchSettings(SearchConfig):
     chance_nodes: bool = False
     dev_chance: bool = True
     ordered: bool = False
+    fused_leaf: bool = True
 
 
 class SelfPlayConfig(_Group):

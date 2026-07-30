@@ -35,7 +35,10 @@ uses them.
     `settlrl_search.policy.ValuePrior` — a prior that also serves the value off
     the *same* forward. The search evaluates a leaf through it, so one trunk pass
     covers both heads: XLA does not merge two separate calls (evidence and
-    numbers in settlrl-search/CLAUDE.md).
+    numbers in settlrl-search/CLAUDE.md). It is then the *prior's* value head
+    that scores leaves, so pairing one with a different `value` needs
+    `cfg.search.fused_leaf=False`; the loop's own pairings are all paired (the
+    heuristic teacher search passes no prior at all).
   - `nn/graph.py` — the board-as-graph featurization (`board_sample` → a
     `Sample` of per-node/-edge/global features + per-hex `tiles` + the engineered
     vector, fixed topology as module constants). `tiles` (the per-hex node

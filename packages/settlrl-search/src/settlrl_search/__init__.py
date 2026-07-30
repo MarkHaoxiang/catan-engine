@@ -23,7 +23,13 @@ from settlrl_engine.mechanics.action import (
 )
 from settlrl_engine.mechanics.trade import _PARTNER_BITS
 
-from settlrl_search.policy import BeliefPolicy, FlatAction, FlatMask, PolicyPrior
+from settlrl_search.policy import (
+    BeliefPolicy,
+    FlatAction,
+    FlatMask,
+    PolicyPrior,
+    ValuePrior,
+)
 from settlrl_search.rows import ROW_PARAMS as _ROW_PARAMS
 from settlrl_search.rows import ROW_TYPE as _ROW_TYPE
 from settlrl_search.sample import sample_world
@@ -41,6 +47,7 @@ from .ismcts import make_tree
 __all__ = [
     "PolicyWeights",
     "PolicyWeightsValue",
+    "ValuePrior",
     "make_search",
     "make_search_weights",
     "make_search_weights_value",
@@ -75,6 +82,7 @@ def make_search_weights_value(
     chance_nodes: bool = False,
     dev_chance: bool = True,
     ordered: bool = False,
+    fused_leaf: bool = True,
 ) -> PolicyWeightsValue:
     """Re-determinizing SO-ISMCTS, returning ``(improved-policy weights, root
     value)`` — the AlphaZero policy *and* value (``q``) targets. The root value is
@@ -83,7 +91,10 @@ def make_search_weights_value(
 
     ``value`` drives the leaf and, when ``prior`` is None, the root one-step
     sweep; a ``prior`` replaces both the root and interior priors with learned
-    logits. ``num_trees`` independent trees are averaged. ``num_simulations=0`` is
+    logits. A :class:`~settlrl_search.policy.ValuePrior` ``prior`` also *supplies
+    the leaf value* from its own head (one forward for both); ``fused_leaf=False``
+    keeps ``value`` in that role, which is what an unpaired ``value``/``prior``
+    wants. ``num_trees`` independent trees are averaged. ``num_simulations=0`` is
     the *lookahead* special case (the bare root sweep, root value = the best legal
     successor value). ``propose_rate`` > 0 lets the root offer trades, scored by
     their accepted outcome under a partner model minus ``trade_penalty``; offers
@@ -100,6 +111,7 @@ def make_search_weights_value(
         chance_nodes=chance_nodes,
         dev_chance=dev_chance,
         ordered=ordered,
+        fused_leaf=fused_leaf,
     )
 
     def value_sweep(
@@ -216,10 +228,13 @@ def make_search_weights(
     chance_nodes: bool = False,
     dev_chance: bool = True,
     ordered: bool = False,
+    fused_leaf: bool = True,
 ) -> PolicyWeights:
     """The improved-policy weights alone (the AlphaZero policy target;
     :func:`make_search` argmaxes these) — :func:`make_search_weights_value` with
-    the root value dropped. Parameters are identical."""
+    the root value dropped. Parameters are identical, including ``fused_leaf``:
+    a :class:`~settlrl_search.policy.ValuePrior` prior's value head scores the
+    leaf unless it is off."""
     wv = make_search_weights_value(
         value,
         prior=prior,
@@ -235,6 +250,7 @@ def make_search_weights(
         chance_nodes=chance_nodes,
         dev_chance=dev_chance,
         ordered=ordered,
+        fused_leaf=fused_leaf,
     )
 
     def weights(
@@ -265,10 +281,13 @@ def make_search(
     chance_nodes: bool = False,
     dev_chance: bool = True,
     ordered: bool = False,
+    fused_leaf: bool = True,
 ) -> BeliefPolicy:
     """Re-determinizing search as a :class:`BeliefPolicy`: the masked argmax of
     the improved policy. Parameters are :func:`make_search_weights`'; tiny noise
-    breaks the lookahead sweep's exact-value ties."""
+    breaks the lookahead sweep's exact-value ties. A
+    :class:`~settlrl_search.policy.ValuePrior` prior's value head scores the leaf
+    unless ``fused_leaf`` is off."""
     weights = make_search_weights(
         value,
         prior=prior,
@@ -284,6 +303,7 @@ def make_search(
         chance_nodes=chance_nodes,
         dev_chance=dev_chance,
         ordered=ordered,
+        fused_leaf=fused_leaf,
     )
 
     def policy(

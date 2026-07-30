@@ -21,6 +21,12 @@ class SearchConfig(BaseModel):
 
     ``chance_nodes`` supersedes ``expected_rolls`` (rolls resolve in-tree), so
     ``expected_rolls`` is forced False whenever ``chance_nodes`` is set.
+
+    ``fused_leaf`` lets a :class:`~settlrl_search.policy.ValuePrior` prior serve
+    the leaf value from the same forward as the leaf's prior — so it is the
+    prior's value head, not the ``value`` argument, that scores leaves. Turn it
+    off to score leaves with ``value`` even under such a prior (an *unpaired*
+    ``value``/``prior``, e.g. a heuristic value under a net's policy head).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -33,6 +39,7 @@ class SearchConfig(BaseModel):
     chance_nodes: bool
     dev_chance: bool
     ordered: bool
+    fused_leaf: bool
 
     @field_validator("num_simulations")
     @classmethod
@@ -86,6 +93,7 @@ class _Cfg(NamedTuple):
     chance_nodes: bool  # explicit dice (+dev) chance nodes in the tree
     dev_chance: bool  # also make BUY_DEVELOPMENT_CARD a chance node (chance_nodes)
     ordered: bool  # apply the action-ordering lock-out to the in-tree legal set
+    fused_leaf: bool  # a ValuePrior's value head scores the leaf (one forward)
     n_nodes: int  # num_simulations + 1
     table: _Table  # the Sequential-Halving considered-visits schedule
 

@@ -15,6 +15,7 @@ the SE can support.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 from typing import Any
 
@@ -26,9 +27,10 @@ from settlrl_engine.belief import BeliefView
 from settlrl_engine.board.layout import EDGE_V, TILE_V, BoardLayout
 from settlrl_engine.board.resources import CITY_COST, SETTLEMENT_COST
 from settlrl_engine.board.state import BoardState, KeyScalar, Player
-from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
+from settlrl_engine.env import N_FLAT, BatchedSettlrlEnv, flat_to_action
 from settlrl_engine.mechanics.common import player_total_vp
 from settlrl_search import make_search, make_search_weights
+from settlrl_search.policy import ValuePrior
 from settlrl_search.value import Value
 
 
@@ -239,6 +241,49 @@ def test_ordered_weights_are_a_legal_distribution(seed: int) -> None:
     )
     assert np.all(w >= 0.0) and abs(float(w.sum()) - 1.0) < 1e-6
     assert float(w[mask == 0].sum()) == 0.0  # support is exactly the legal set
+
+
+@dataclasses.dataclass(frozen=True)
+class _FusedPrior:
+    """A :class:`ValuePrior`: uniform logits plus a value head that is ``gain``
+    times the contract leaf — so a fused leaf (the prior's own value) and an
+    unfused one (the ``value`` argument) agree exactly iff ``gain == 1``."""
+
+    gain: float = 1.0
+
+    def __call__(self, layout: BoardLayout, state: BoardState, player: Player) -> Any:
+        return jnp.zeros((N_FLAT,), jnp.float32)
+
+    def with_value(
+        self, layout: BoardLayout, state: BoardState, player: Player
+    ) -> tuple[Value, Any]:
+        v: Value = self.gain * heuristic_value(layout, state, player)
+        return v, self(layout, state, player)
+
+
+def _prior_weights(prior: Any, *, fused_leaf: bool) -> np.ndarray:
+    """Weights from a search whose interior prior is ``prior``."""
+    layout, view, p, mask = _position(1, steps=120)
+    fn = make_search_weights(
+        heuristic_value, prior=prior, num_simulations=12, fused_leaf=fused_leaf
+    )
+    w = jax.jit(fn)(jax.random.key(5), layout, view, jnp.int32(p), jnp.asarray(mask))
+    return np.asarray(w)
+
+
+def test_value_prior_serves_the_leaf_only_under_fused_leaf() -> None:
+    # `isinstance(prior, ValuePrior)` is what selects the one-forward leaf path,
+    # so a prior whose value head *disagrees* with `value` shows which one ran.
+    off_gain = _FusedPrior(gain=0.5)
+    two_seam = _prior_weights(off_gain, fused_leaf=False)
+    assert isinstance(off_gain, ValuePrior)  # the protocol is structural
+    assert not np.array_equal(_prior_weights(off_gain, fused_leaf=True), two_seam)
+    # Paired seams: taking both off one call changes nothing but the op count.
+    paired = _FusedPrior(gain=1.0)
+    assert np.array_equal(
+        _prior_weights(paired, fused_leaf=True),
+        _prior_weights(paired, fused_leaf=False),
+    )
 
 
 def test_visits_concentrate_above_uniform() -> None:

@@ -84,6 +84,7 @@ def _weights_factory(cfg: LearnConfig) -> tuple[Any, dict[str, Any]]:
         "max_depth": s.max_depth, "max_num_considered_actions": s.max_considered,
         "expected_rolls": s.expected_rolls, "chance_nodes": s.chance_nodes,
         "dev_chance": s.dev_chance, "ordered": s.ordered,
+        "fused_leaf": s.fused_leaf,
     }  # fmt: skip
 
 

@@ -16,6 +16,7 @@ from settlrl_search.policy import (
     PolicyPrior,
     StatefulPolicy,
     StatefulSpec,
+    ValuePrior,
 )
 from settlrl_search.sample import sample_world
 
@@ -88,6 +89,7 @@ __all__ = [
     "StatefulSpec",
     "Value",
     "ValueFunction",
+    "ValuePrior",
     "evaluate",
     "greedy_policy",
     "heuristic_value",

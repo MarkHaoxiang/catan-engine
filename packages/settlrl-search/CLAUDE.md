@@ -48,7 +48,10 @@ Module map:
   The generic cannot type `defaults` itself: `make(**mapping)` is uncheckable
   (ParamSpec doesn't apply to dynamic unpacking). `PolicyPrior` is the
   learned-policy-head seam: `make_search` takes one in place of its built-in
-  priors (root sweep + tier table), applying legality masking itself. Policies are masked-argmax style: with no legal
+  priors (root sweep + tier table), applying legality masking itself.
+  `ValuePrior` extends it with `with_value` — the shared-trunk nets' seam, which
+  also serves the leaf value (see the leaf-evaluation note below); both are
+  re-exported from the package root. Policies are masked-argmax style: with no legal
   move the returned index is arbitrary and the engine rejects it as
   `INVALID` (the lane stalls until auto-reset), matching
   `BatchedSettlrlEnv.random_actions`.
@@ -107,12 +110,20 @@ simulation `while` body). So a net hands the search one `ValuePrior` seam
 (`policy.py`) whose `with_value` returns both from a single forward;
 `descent._value_and_logits` takes it when the prior offers one and otherwise
 calls the two seams as before (the heuristic-leaf + tier-prior path is
-unchanged). Measured on a `gn_global` 96×4 net, 4 sims: 211.7 → 141.4 MFLOP per
+unchanged). **It is then the prior's value head, not the `value` argument, that
+scores leaves** — right for a *paired* seam, wrong for an unpaired
+`value`/`prior` (a heuristic value under a net's policy head, measured Δq up to
+0.15), so `fused_leaf=False` (`make_tree` / `make_search*` / `SearchConfig`)
+forces the two-seam path back. Measured on a `gn_global` 96×4 net, 4 sims: 211.7 → 141.4 MFLOP per
 compiled search (2.99 → 2.00 forwards), 18 → 9 in-loop node dots; with
 `expected_rolls`, 983.9 → 913.5 MFLOP (the roll EV's 11 value calls stay).
 Outputs are bit-identical — the same graph, emitted once — and settlrl-learn's
 `tests/test_leaf_seam.py` censuses the in-loop dots against a deliberately split
-seam, so the duplication cannot come back silently.
+seam (observed 5 vs 10 at width 8 / 2 layers; the *ratio* is the assertion) and
+pins that both emit the same weights, so the duplication cannot come back
+silently. `tests/test_ismcts.py` covers the dispatch itself with a fake
+`ValuePrior` whose value head is a scaled leaf: fused and unfused differ when the
+seams disagree, and are bit-identical when they agree.
 
 **The leaf is the ceiling.** The binding constraint is the stationary heuristic
 leaf, not search machinery: win rate vs lookahead does *not* climb with sims (64

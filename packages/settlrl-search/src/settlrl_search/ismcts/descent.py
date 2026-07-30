@@ -122,10 +122,11 @@ def _value_and_logits(
 
     Both come from a single evaluation when the prior is a
     :class:`~settlrl_search.policy.ValuePrior` — the shared-trunk nets' seam —
-    instead of one forward per head."""
+    instead of one forward per head. That makes the *prior's* value head score
+    the leaf; ``cfg.fused_leaf`` off keeps ``cfg.value`` in that role."""
     if cfg.prior is None:
         return _value(cfg, layout, state, player), _TIER_LOGITS
-    if isinstance(cfg.prior, ValuePrior):
+    if cfg.fused_leaf and isinstance(cfg.prior, ValuePrior):
         raw, logits = cfg.prior.with_value(layout, state, player)
         return _squash(cfg, state, player, raw), logits
     return _value(cfg, layout, state, player), cfg.prior(layout, state, player)
