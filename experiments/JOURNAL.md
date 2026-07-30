@@ -104,6 +104,28 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   runs/0004_alphazero/2026-07-28T231545Z (persistent@1024). Parallel-descent
   search work (K-way SH blocks, virtual loss) stays out of scope until a
   scale2-based long run re-tests the plateau.
+- 0004 fused-leaf seam fix — GPU-throughput-neutral, structural value only
+  (2026-07-30). The seam fix (1b442ec/ce8b376) makes a `ValuePrior` serve one
+  net forward per leaf instead of two, motivated by a CPU HLO dot census
+  (bisected 2026-07-30) that found XLA does not merge the duplicate forward on
+  CPU and predicted a ~20-26% self-play throughput win. A GPU confirmation
+  bench at the pinned config (B=256 non-persistent) found none:
+  194.91 vs the frozen 193.81 samples/s baseline, +0.6% — noise, well under
+  the 10% sanity gate (runs/0004_alphazero/2026-07-30T093739Z vs
+  runs/0004_alphazero/2026-07-28T103722Z). Resolution: GPU XLA already
+  common-subexpression-eliminates the duplicate forward (2026-07-27 GPU HLO
+  measurement: identical HLO, 441 dots, wall 1.03) — the CPU non-merging
+  finding was CPU-specific, and the CPU examiner's report had explicitly
+  flagged this exact risk. The fix stays: it guarantees a single forward *by
+  construction* rather than by luck of the compiler, is bit-exact with the
+  unfused path, and is pinned by a regression test
+  (`settlrl-learn/tests/test_leaf_seam.py`) so the duplication cannot come
+  back silently — the value is structural (correctness + halved CPU op
+  emission), not a self-play speedup. Docs corrected in the same commit
+  (`packages/settlrl-search/CLAUDE.md`, `packages/settlrl-learn/CLAUDE.md`):
+  the CPU MFLOP/dot-count numbers are now flagged as CPU-only, not GPU
+  wall-clock. Persistent@512 bench and the search_step_ms micro-checks were
+  skipped (nothing further to confirm once the primary gate failed to clear).
 - 0001_bench_smoke/calibrate — pass, one-off anchor-scale reset (2026-07-29):
   a joint Elo MLE (coordinate-ascent Bradley-Terry, `calibrate.py::joint_fit`)
   over the complete round-robin {random, greedy, lookahead, mcts, az0_gnn96x4}

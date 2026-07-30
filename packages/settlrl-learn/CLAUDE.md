@@ -34,8 +34,11 @@ uses them.
     Both adapters (`make_az`, `gnn_seams`) return their prior as a
     `settlrl_search.policy.ValuePrior` — a prior that also serves the value off
     the *same* forward. The search evaluates a leaf through it, so one trunk pass
-    covers both heads: XLA does not merge two separate calls (evidence and
-    numbers in settlrl-search/CLAUDE.md). It is then the *prior's* value head
+    covers both heads by construction: on CPU, XLA does not merge two separate
+    calls; on GPU, XLA already CSEs the duplicate forward, so the fix is
+    GPU-throughput-neutral, confirmed by an in-loop bench (194.91 vs 193.81
+    samples/s, +0.6%, noise) — its value is structural, not speed (evidence and
+    CPU-only numbers in settlrl-search/CLAUDE.md). It is then the *prior's* value head
     that scores leaves, so pairing one with a different `value` needs
     `cfg.search.fused_leaf=False`; the loop's own pairings are all paired (the
     heuristic teacher search passes no prior at all).

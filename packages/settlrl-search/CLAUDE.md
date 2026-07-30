@@ -102,11 +102,20 @@ constants live in `_common.py`, the trade/lookahead/`num_trees` wrapper in
 `mcts`/`smcts`/`ismcts`/`lookahead` quartet (2026-06-17) then the `mctx` engine
 behind it (2026-06-19, 742b94b). ~5–6 ms/move (B=1 CPU; was 7.4 with mctx).
 
-**One leaf evaluation per simulation.** A leaf needs both a value and an
-expansion prior, and XLA does **not** merge two calls of the same shared-trunk
-net on the same state (bisected 2026-07-30: trivial featurizations merge, the
-real `board_sample` does not — a dot census found two complete trunks in the
-simulation `while` body). So a net hands the search one `ValuePrior` seam
+**One leaf evaluation per simulation (structural fix; GPU-neutral).** A leaf
+needs both a value and an expansion prior. On CPU, XLA does **not** merge two
+calls of the same shared-trunk net on the same state (bisected 2026-07-30:
+trivial featurizations merge, the real `board_sample` does not — a CPU dot
+census found two complete trunks in the simulation `while` body). On GPU, XLA
+already common-subexpression-eliminates the duplicate forward (2026-07-27 GPU
+HLO measurement: identical HLO, 441 dots, wall 1.03), so this fix carries no
+GPU throughput win — confirmed 2026-07-30 by a `bench_throughput` run at the
+pinned config: 194.91 vs the frozen 193.81 samples/s baseline, +0.6%,
+noise-level (runs/0004_alphazero/2026-07-30T093739Z vs
+runs/0004_alphazero/2026-07-28T103722Z). The fix's value is structural: a
+single forward by construction rather than by luck of the compiler, half the
+CPU op emission, and a regression test that pins the duplication so it cannot
+come back silently. So a net hands the search one `ValuePrior` seam
 (`policy.py`) whose `with_value` returns both from a single forward;
 `descent._value_and_logits` takes it when the prior offers one and otherwise
 calls the two seams as before (the heuristic-leaf + tier-prior path is
@@ -114,9 +123,11 @@ unchanged). **It is then the prior's value head, not the `value` argument, that
 scores leaves** — right for a *paired* seam, wrong for an unpaired
 `value`/`prior` (a heuristic value under a net's policy head, measured Δq up to
 0.15), so `fused_leaf=False` (`make_tree` / `make_search*` / `SearchConfig`)
-forces the two-seam path back. Measured on a `gn_global` 96×4 net, 4 sims: 211.7 → 141.4 MFLOP per
-compiled search (2.99 → 2.00 forwards), 18 → 9 in-loop node dots; with
-`expected_rolls`, 983.9 → 913.5 MFLOP (the roll EV's 11 value calls stay).
+forces the two-seam path back. Measured on a `gn_global` 96×4 net, 4 sims,
+**CPU HLO census** (op counts, not GPU wall-clock or FLOP/s — GPU already
+merged these, see above): 211.7 → 141.4 MFLOP per compiled search (2.99 →
+2.00 forwards), 18 → 9 in-loop node dots; with `expected_rolls`, 983.9 → 913.5
+MFLOP (the roll EV's 11 value calls stay).
 Outputs are bit-identical — the same graph, emitted once — and settlrl-learn's
 `tests/test_leaf_seam.py` censuses the in-loop dots against a deliberately split
 seam (observed 5 vs 10 at width 8 / 2 layers; the *ratio* is the assertion) and
