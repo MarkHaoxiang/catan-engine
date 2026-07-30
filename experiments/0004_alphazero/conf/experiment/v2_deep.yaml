@@ -29,3 +29,9 @@ search:
   num_simulations: 128
 replay:
   buffer_max: 200000
+# scale2_long's budget fix (halved games/period off arena/scale.yaml's pre-fix
+# cadence -- ~9.8% wall-share instead of ~70%; docs/superpowers/gpu-day-checklist.md
+# item 7).
+arena:
+  games: 64
+  every: 150

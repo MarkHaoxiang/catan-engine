@@ -101,8 +101,8 @@ class _GNNPrior:
 
     model: BoardGNN
     het: bool
-    version: int = 1
-    incidence: bool = False
+    version: int
+    incidence: bool
 
     def _sample(
         self, layout: BoardLayout, state: BoardState, player: IntScalar

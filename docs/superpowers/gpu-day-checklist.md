@@ -170,7 +170,10 @@ timestamps) rather than trusting the pre-run estimate.
 
 **Decision:** if 16.1% is confirmed (not an artifact of a cold-start
 iteration or a one-off slow round), retune `arena.games`/`arena.every` in
-`scale2_long.yaml` (and the `v2_*` study presets, which share the `scale`
-arena group) down to actually hit the 9.8% budget — halving `games` again
-(64 → 32) is the cheapest lever before touching `every`. Record the retuned
-values and the before/after realized share in `experiments/JOURNAL.md`.
+`scale2_long.yaml` (and the `v2_*` study presets, which now carry the same
+`games=64`/`every=150` starting point as a direct per-preset override, landed
+2026-07-30 — before that they inherited `arena: scale`'s raw pre-fix cadence,
+`games=128`/`every=10`, ~70% wall-share, not scale2_long's measured 16.1%)
+down to actually hit the 9.8% budget — halving `games` again (64 → 32) is the
+cheapest lever before touching `every`. Record the retuned values and the
+before/after realized share in `experiments/JOURNAL.md`.

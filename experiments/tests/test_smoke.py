@@ -296,3 +296,64 @@ def test_0004_resume_state_reads_checkpoint_and_wandb_id(tmp_path: Path) -> None
     checkpoint, wandb_id = run._resume_state(str(prior))
     assert checkpoint == prior / "runstate.eqx"
     assert wandb_id == "abc123"
+
+
+def test_0004_match_cli_produces_result(tmp_path: Path) -> None:
+    # Composition-level check for match.py (gpu-day-checklist.md item 5's named
+    # gap): two tiny width-8 run-dir checkpoints, `sims=0` (the lookahead
+    # special case -- cheap to compile) -- proves the CLI wiring (arg parsing ->
+    # run-dir loading -> arena_spec -> result dict -> json write), not strength.
+    # No real GPU match belongs in this suite.
+    import equinox as eqx
+    import jax
+    from settlrl_learn.nn.board_gnn import BoardGNN
+    from settlrl_learn.nn.graphnet import PRESETS
+
+    match = load_run("0004_alphazero", module="match")
+
+    netcfg = PRESETS["gn_global"]._replace(width=8, layers=1, head_depth=1)
+    net_cfg_dump = {
+        "kind": "gnn",
+        "width": 8,
+        "depth": 1,
+        "layers": 1,
+        "preset": "gn_global",
+        "feature_version": 1,
+        "incidence": False,
+        "setup_depth": 1,
+        "setup_temperature": 2.0,
+        "setup_beam": 4,
+    }
+    for i, name in enumerate(["a", "b"]):
+        run_dir = tmp_path / name
+        run_dir.mkdir()
+        (run_dir / "manifest.json").write_text(
+            json.dumps({"config": {"net": net_cfg_dump}})
+        )
+        eqx.tree_serialise_leaves(
+            run_dir / "best.eqx", BoardGNN(jax.random.key(i), netcfg)
+        )
+
+    out_path = tmp_path / "result.json"
+    result = match.main(
+        [
+            str(tmp_path / "a"),
+            str(tmp_path / "b"),
+            "--games",
+            "2",
+            "--sims",
+            "0",
+            "--considered",
+            "4",
+            "--batch",
+            "2",
+            "--out",
+            str(out_path),
+        ]
+    )
+    assert result["episodes"] >= 1
+    assert 0.0 <= result["winrate_a"] <= 1.0
+    assert result["se"] >= 0.0
+    written = json.loads(out_path.read_text())
+    assert written["net_a"] == str(tmp_path / "a")
+    assert written["net_b"] == str(tmp_path / "b")
