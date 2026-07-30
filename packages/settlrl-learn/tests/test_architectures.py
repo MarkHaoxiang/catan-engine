@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -31,7 +30,7 @@ from settlrl_engine.board.dev_cards import DevCard
 from settlrl_engine.board.state import BoardState
 from settlrl_engine.env import N_FLAT, ActionType, BatchedSettlrlEnv
 from settlrl_learn.features import features
-from settlrl_learn.nn import graph
+from settlrl_learn.nn import graph, graphnet
 from settlrl_learn.nn.architectures import DeepSetModel, GNNModel, MLPModel
 from settlrl_learn.nn.board_gnn import BoardGNN
 from settlrl_learn.nn.graph import Sample, board_sample
@@ -168,7 +167,8 @@ def test_graphnet_presets_are_invariant(preset: str, version: int) -> None:
     assert np.allclose(base, np.asarray(model(relabeled)), atol=1e-3)
 
 
-def test_v1_ctx_unbounded_v2_layernorm_bounds_it() -> None:
+@pytest.mark.parametrize("net_seed", [0, 3])
+def test_v1_ctx_unbounded_v2_layernorm_bounds_it(net_seed: int) -> None:
     # Correctness-audit evidence, direct: on a real board, v1's raw ctx
     # (pooled readout ++ the global node ``g``) sits at ~25x the L2 norm a
     # random-init head is scaled for -- an artifact of sum-pooling over
@@ -177,10 +177,12 @@ def test_v1_ctx_unbounded_v2_layernorm_bounds_it() -> None:
     # LayerNorm provably (weight=1, bias=0 at init) bounds the WHOLE vector
     # to unit per-element variance, so its norm sits at ``sqrt(dim)``
     # regardless of net init; v1 clears many times that -- the control this
-    # test asserts must fail to stay bounded.
+    # test asserts must fail to stay bounded. Parametrized over two net-init
+    # seeds: the margin is huge either way (raw norm ~200-210 vs a ~40
+    # threshold, checked across 6 seeds), so this is not noise-sensitive.
     layout, state = _mid_game(4)
     p = jnp.int32(0)
-    net1, net2 = _aznet("gn_global", 1), _aznet("gn_global", 2)
+    net1, net2 = _aznet("gn_global", 1, net_seed), _aznet("gn_global", 2, net_seed)
     _h1, g1, readout1, _t1 = net1.trunk(board_sample(layout, state, p, version=1))
     ctx1 = jnp.concatenate([readout1, g1])
     _h2, g2, readout2, _t2 = net2.trunk(board_sample(layout, state, p, version=2))
@@ -205,6 +207,10 @@ def test_v2_ctx_norm_keeps_init_value_logit_calibrated() -> None:
     # outside the unsaturated band regardless of the actual position, while
     # v2's bounded ctx keeps it inside -- at the project's canonical test net
     # seed (``_aznet``'s ``jax.random.key(0)``, not selected for this result).
+    # Not parametrized over a second net seed (unlike the previous test): of
+    # the 10 seeds checked, one (net_seed=1) has v1's |mean logit| at 0.418 --
+    # under the saturation bar -- so a second seed here is a coin flip, not a
+    # cheap robustness fold.
     positions = [_mid_game(2, steps=150, seed=s) for s in range(32)]
     saturated_bar = 2.0  # |logit|/2 > 1 already compresses tanh toward +-1
     for version, must_saturate in ((1, True), (2, False)):
@@ -221,25 +227,24 @@ def test_v2_ctx_norm_keeps_init_value_logit_calibrated() -> None:
 def test_v2_readout_std_finite_at_zero_variance() -> None:
     # The std readout block (`graphnet._pool`) computes `sqrt(var + eps)`;
     # without the eps guard, `sqrt`'s gradient is infinite at exact zero
-    # variance. Forced here by zeroing every node's encoded embedding
-    # (identical rows -> exact zero cross-node variance on a fresh board),
-    # checked on both the forward value and its gradient (the NaN risk is in
-    # the backward pass, not the forward one, where sqrt(0) == 0 is fine).
-    cfg = PRESETS["gn_base"]._replace(
-        width=8, layers=1, head_depth=1, feature_version=2, readout="multi"
-    )
-    net = GraphNet(jax.random.key(0), out_dim=1, cfg=cfg)
-    layout, state = _mid_game(2, steps=0)
-    sample = board_sample(layout, state, jnp.int32(0), version=2)
-    sample = sample._replace(nodes=jnp.zeros_like(sample.nodes))
+    # variance (`sqrt(0) == 0` is already fine forward -- the hazard is in
+    # the backward pass). A real forward's post-message-passing `h` never
+    # hits *exact* zero variance -- even with every node's encoded embedding
+    # zeroed, edge features + degree reintroduce ~1e-4..1e-3 cross-node
+    # variance -- so a black-box forward test cannot exercise the guard.
+    # Exercises `_pool` directly on a manufactured all-equal `h`
+    # (`var(0) == 0` exactly), checking both the forward value and the
+    # gradient. Falsified: fails (NaN grad) with `_STD_EPS` locally patched
+    # to `0.0` -- see the Task 2 fix report.
+    h = jnp.full((6, 4), 3.0)
+    assert bool(jnp.all(h.var(0) == 0.0))  # the exact-zero-variance precondition
 
-    def loss(m: GraphNet) -> jax.Array:
-        return m(sample)[0] ** 2
+    def loss(x: jax.Array) -> jax.Array:
+        return graphnet._pool("multi", x, 2).sum() ** 2
 
-    val, grad = eqx.filter_value_and_grad(loss)(net)
+    val, grad = jax.value_and_grad(loss)(h)
     assert bool(jnp.isfinite(val))
-    leaves = jax.tree.leaves(eqx.filter(grad, eqx.is_inexact_array))
-    assert all(bool(jnp.isfinite(g).all()) for g in leaves)
+    assert bool(jnp.isfinite(grad).all())
 
 
 def test_hetero_off_ignores_tiles() -> None:
@@ -290,11 +295,11 @@ def test_flat_mlp_is_not_symmetry_invariant() -> None:
     assert moved > 1e-3
 
 
-def _aznet(preset: str = "gn_global", version: int = 1) -> BoardGNN:
+def _aznet(preset: str = "gn_global", version: int = 1, net_seed: int = 0) -> BoardGNN:
     cfg = PRESETS[preset]._replace(
         width=16, layers=2, head_depth=1, feature_version=version
     )
-    return BoardGNN(jax.random.key(0), cfg)
+    return BoardGNN(jax.random.key(net_seed), cfg)
 
 
 @pytest.mark.parametrize("version", [1, 2])
