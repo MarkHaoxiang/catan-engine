@@ -1,4 +1,4 @@
-# Featurization v2 Implementation Plan (PROPOSED — awaiting sign-off)
+# Featurization v2 Implementation Plan (APPROVED by Mark 2026-07-30 — "go ahead with featurization")
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task, ONLY after Mark approves it. Steps use checkbox (`- [ ]`) syntax.
 
@@ -27,9 +27,9 @@
 
 v2 option `incidence: bool`: per-vertex concatenation of its ≤3 adjacent hexes' (resource one-hot 6 incl. desert, pips/5, robber, number one-hot 11) — UN-summed, fixed order (canonical hex index; padded for coast vertices) — restoring per-tile identity and number identity without new message passing (the research-endorsed cheap arm; also the pips-collapse fix: 6-vs-8 distinguishable via number one-hot). NODE_DIM grows accordingly. Equivariance: the fixed per-vertex hex ORDER must be symmetry-consistent — verify against `_symmetry.py`'s permutations (if a canonical order breaks D3 equivariance, use a symmetric encoding: sum + max + sorted-by-pips, and document the tradeoff). This is the subtle step — the symmetry suite is the gate.
 
-### Task 4: root_q target repair (gated on the probe + a mini-panel)
+### Task 4: root_q target repair — RESOLVED, DROPPED (2026-07-30)
 
-IF the seam-fix task's root_q probe confirms material pessimistic bias: change the value-blend's q source from visit-weighted root mean to the root's completed/mixed value (`_completed_q` at node 0), flag-gated (`value_blend.q_source: {"visit_mean","mixed"}`), goldens for both. Run one adversarial review of the design before building (target-semantics change). If the probe says the bias is small/expected: record the numbers in CLAUDE.md and drop this task.
+The probe ran with the seam fix: root_q sits ~2–3pp of win-prob below the Gumbel mixed value and the gap shrinks with sims — the expected Sequential-Halving exploration effect, not a structural bias, and not the 0.38-vs-0.53 explanation (the hand-blindness fixed by Tasks 1–3 is the leading suspect for that). Numbers recorded in `.superpowers/sdd/gnn-optimization-notes.md` and `packages/settlrl-search/CLAUDE.md`. No code change.
 
 ### Task 5: Study configs + goldens + GPU-day checklist
 
