@@ -9,8 +9,10 @@ paths, and ``main``.
 
 from __future__ import annotations
 
+import gc
 from typing import TYPE_CHECKING, Any
 
+import jax
 from pydantic import BaseModel, ConfigDict
 from settlrl_agents import BeliefSpec
 from settlrl_learn.experiment import Run
@@ -82,7 +84,21 @@ def run_final_gauntlet(
     every net opponent's ``every`` forced to 1). With every schedule's period 1,
     ``round_index % 1 == 0`` unconditionally, so ``round_index`` plays no role;
     0 is passed for clarity. Seeded off ``cfg.seed + 99`` -- the legacy final-arena
-    base -- so the gauntlet's games stay disjoint from the in-loop training arenas."""
+    base -- so the gauntlet's games stay disjoint from the in-loop training arenas.
+
+    Drops jax's compilation caches first, so no compiled program a caller built
+    before this call survives it."""
+    # memory: the training loop's compiled programs (self-play at B=512, the
+    # optimiser step, the in-loop arenas) stay loaded on the device via jax's jit
+    # caches long after `learn` returned, and the gauntlet then compiles its own
+    # (one per rung, plus two net-opponent searches). A 2026-07-30 v2_base run
+    # died right here on CUDA_ERROR_OUT_OF_MEMORY loading a gauntlet module. The
+    # clear costs a recompile and frees them; the collect drops the training
+    # arrays reachable only through cycles. Neither returns pool memory to the
+    # driver -- if a foreign process is sharing the GPU, launch with
+    # XLA_PYTHON_CLIENT_PREALLOCATE=false as well.
+    jax.clear_caches()  # type: ignore[no-untyped-call]
+    gc.collect()
     final_arena_cfg = ArenaConfig(
         **cfg.arena.model_dump(exclude={"net_opponents"})
     ).model_copy(update={"games": cfg.final_games, "opponent_every": {}})

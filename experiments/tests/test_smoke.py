@@ -255,11 +255,23 @@ def test_0004_final_gauntlet_neutralizes_schedules(
         captured["net_opponents"] = net_opponents
         return {"arena_elo": 10.0, "arena_elo_se": 1.0, "arena_winrate": 0.5}
 
-    monkeypatch.setattr(arena_helpers, "run_arena", fake_run_arena)
+    # The training loop's compiled programs must be gone *before* the gauntlet
+    # compiles its own (the OOM fix) -- order matters, so record the sequence.
+    order: list[str] = []
+    monkeypatch.setattr(
+        arena_helpers.jax, "clear_caches", lambda: order.append("clear_caches")
+    )
+
+    def recording_run_arena(*args: Any, **kwargs: Any) -> dict[str, float]:
+        order.append("run_arena")
+        return fake_run_arena(*args, **kwargs)
+
+    monkeypatch.setattr(arena_helpers, "run_arena", recording_run_arena)
     net_opponents = {"az0": (object(), -100.0, 5)}  # every=5, to be neutralized
 
     metrics = run.run_final_gauntlet(object(), object(), cfg, net_opponents)
 
+    assert order == ["clear_caches", "run_arena"]
     arena_cfg = captured["arena_cfg"]
     assert arena_cfg.games == 7
     assert arena_cfg.opponent_every == {}
