@@ -27,7 +27,7 @@ from _symmetry import (
 )
 from settlrl_engine.board import Board
 from settlrl_engine.board.dev_cards import DevCard
-from settlrl_engine.board.layout import N_TILES, N_VERTICES, BoardLayout
+from settlrl_engine.board.layout import N_VERTICES, BoardLayout
 from settlrl_engine.board.resources import N_RESOURCES
 from settlrl_engine.board.state import BoardState
 from settlrl_engine.board.tile import Tile
@@ -512,6 +512,45 @@ def test_v1_features_match_the_frozen_golden(n_players: int) -> None:
         assert hashlib.sha256(v.tobytes()).hexdigest()[:16] == digest
 
 
+# Captured from the featurization-v2 Tasks 1/2 landing (`board_sample(_mid_game(n),
+# p=0, version=2)`, incidence off): sha256 prefixes of each array. `edges`/`tiles`
+# match `_V1_GOLDEN` byte-for-byte (v2 doesn't touch them); `nodes` differs (the
+# pips/5 scaling fix, Task 1) and `glob` differs (wider + the pips-consistent
+# scaling) -- pinning both closes the gap `_V1_GOLDEN` leaves: v2-sans-incidence
+# is the featurization every study arm except v2_incidence trains on, and until
+# this test it had no byte-level pin of its own, only the appended-block's
+# numeric values (`test_v2_block_pins_its_layout_and_scaling`) and shape/dims
+# checks. `nn/graphnet.py`'s v2-gated readout/LayerNorm (Task 2) is a net-level
+# change, not a `board_sample` one, so it cannot perturb this golden.
+_V2_GOLDEN = {
+    2: {
+        "nodes": ((54, 17), "2278ef52689927ef"),
+        "edges": ((144, 3), "983a355d434685a0"),
+        "glob": ((54,), "28692c3860ed6229"),
+        "tiles": ((19, 9), "3654e9f9f523b789"),
+    },
+    4: {
+        "nodes": ((54, 17), "7132cdee90f1749b"),
+        "edges": ((144, 3), "658ca8b2746119cb"),
+        "glob": ((54,), "9707e255be1f231b"),
+        "tiles": ((19, 9), "819be6de7b7bb3a6"),
+    },
+}
+
+
+@pytest.mark.parametrize("n_players", [2, 4])
+def test_v2_features_match_the_frozen_golden(n_players: int) -> None:
+    layout, state = _mid_game(n_players)
+    sample = board_sample(layout, state, jnp.int32(0), version=2)
+    for name, (shape, digest) in _V2_GOLDEN[n_players].items():
+        v = np.asarray(getattr(sample, name))
+        assert v.shape == shape and str(v.dtype) == "float32"
+        assert hashlib.sha256(v.tobytes()).hexdigest()[:16] == digest
+        # edges/tiles are v1's bytes exactly -- v2 never touches them.
+        if name in ("edges", "tiles"):
+            assert digest == _V1_GOLDEN[n_players][name][1]
+
+
 def test_feature_version_dims() -> None:
     v1, v2 = graph.dims(1, False), graph.dims(2, False)
     assert v1 == (graph.NODE_DIM, graph.EDGE_DIM, graph.GLOBAL_DIM, graph.TILE_DIM)
@@ -704,8 +743,10 @@ def test_incidence_sort_key_is_injective_on_the_hex_payload() -> None:
 
 def _incidence_stress(layout: BoardLayout, state: BoardState) -> Board:
     """A board that engages every incidence hazard at one interior vertex: its
-    three hexes are the desert plus a genuine payload *tie* (two hexes with the
-    same resource and number), with the robber on a fourth hex."""
+    three hexes are the desert plus a *near-tie* (two hexes sharing resource and
+    number), with the robber on one of the near-tied hexes -- the robber term of
+    ``_tile_sort_key`` is what breaks it, so this exercises the tie-breaking path
+    itself, not just a resolved tie."""
     slots = np.asarray(graph.VERTEX_TILES)
     deg = np.asarray(graph.VERTEX_TILE_PRESENT).sum(1)
     v = int(np.flatnonzero(deg == graph.MAX_VERTEX_TILES)[0])
@@ -716,10 +757,9 @@ def _incidence_stress(layout: BoardLayout, state: BoardState) -> Board:
     res[t0], num[t0] = int(Tile.DESERT), 0
     res[t1] = res[t2] = int(Tile.WOOD)
     num[t1] = num[t2] = 6
-    elsewhere = next(t for t in range(N_TILES) if t not in (t0, t1, t2))
     return layout._replace(
         tile_resource=jnp.asarray(res), tile_number=jnp.asarray(num)
-    ), state._replace(robber=jnp.asarray(elsewhere, state.robber.dtype))
+    ), state._replace(robber=jnp.asarray(t1, state.robber.dtype))
 
 
 def test_incidence_features_are_symmetry_equivariant() -> None:
@@ -730,8 +770,11 @@ def test_incidence_features_are_symmetry_equivariant() -> None:
     # vertex's slots by the hexes' own attributes instead is equivariant: a
     # symmetry carries each hex's attributes with it, so the *multiset* of
     # incident payloads at sigma(v) equals the one at v, and sorting a multiset
-    # is well defined. Checked on the hostile board (desert, duplicate hexes,
-    # robber) -- ties and pads are exactly where a slot-order bug would hide.
+    # is well defined. Checked on the hostile board (desert, duplicate hexes with
+    # the robber on one of them) -- the near-tie, its robber-driven break, and the
+    # pad are exactly where a slot-order bug would hide. The robber sits on one of
+    # the near-tied hexes (not a fourth, uninvolved one) so the robber term of the
+    # sort key is the thing under test, not just an already-broken tie.
     layout, state = _incidence_stress(*_mid_game(4))
     p = jnp.int32(0)
     base = np.asarray(board_sample(layout, state, p, version=2, incidence=True).nodes)
@@ -739,11 +782,19 @@ def test_incidence_features_are_symmetry_equivariant() -> None:
     deg = np.asarray(graph.VERTEX_TILE_PRESENT).sum(1)
     v = int(np.flatnonzero(deg == graph.MAX_VERTEX_TILES)[0])
     rows = _incidence(base)[v]
-    # vacuity: the tie and the desert really are in this vertex's slots.
-    assert (
-        sum(np.array_equal(rows[i], rows[j]) for i, j in ((0, 1), (0, 2), (1, 2))) == 1
-    )
+    # vacuity: the desert slot is present, and exactly one pair agrees on every
+    # column except the robber flag -- the near-tie the robber term must break.
     assert rows[:, N_RESOURCES].sum() == 1.0  # exactly one desert slot
+    robber_col = N_RESOURCES + 2
+    other_cols = [c for c in range(graph.INCIDENT_TILE_DIM) if c != robber_col]
+    near_ties = [
+        (i, j)
+        for i, j in ((0, 1), (0, 2), (1, 2))
+        if np.array_equal(rows[i, other_cols], rows[j, other_cols])
+    ]
+    assert len(near_ties) == 1
+    i, j = near_ties[0]
+    assert rows[i, robber_col] != rows[j, robber_col]  # robber is what breaks it
     for sym in board_symmetries():
         l2, s2 = apply_symmetry(layout, state, sym)
         rot = np.asarray(board_sample(l2, s2, p, version=2, incidence=True).nodes)
@@ -791,3 +842,26 @@ def test_incidence_dims_and_v2_block_untouched() -> None:
         )
     with pytest.raises(ValueError, match="incidence"):
         board_sample(layout, state, p, version=1, incidence=True)
+
+
+# The v2_incidence study arm's own node block: sha256 of just the appended
+# incidence tail (nodes[:, -INCIDENCE_DIM:]) on the canonical `_mid_game`
+# fixture. `test_incidence_dims_and_v2_block_untouched` already pins that the
+# v2-sans-incidence prefix and every other array are untouched by the flag, so
+# this is the one remaining unpinned byte range across the four study arms'
+# feature paths -- v1 (`_V1_GOLDEN`), v2-sans-incidence (`_V2_GOLDEN`, feeds
+# v2_base/v2_deep/v2_hetero), and now v2_incidence's own tail.
+_V2_INCIDENCE_GOLDEN = {
+    2: ((54, 57), "986011fbff3b35f7"),
+    4: ((54, 57), "2a3b5d0f9de68800"),
+}
+
+
+@pytest.mark.parametrize("n_players", [2, 4])
+def test_v2_incidence_block_matches_the_frozen_golden(n_players: int) -> None:
+    layout, state = _mid_game(n_players)
+    sample = board_sample(layout, state, jnp.int32(0), version=2, incidence=True)
+    tail = np.asarray(sample.nodes)[:, -graph.INCIDENCE_DIM :]
+    shape, digest = _V2_INCIDENCE_GOLDEN[n_players]
+    assert tail.shape == shape and str(tail.dtype) == "float32"
+    assert hashlib.sha256(tail.tobytes()).hexdigest()[:16] == digest

@@ -49,7 +49,7 @@ uses them.
     trunk; `board_sample(with_tiles=False)` skips them (a constant-zero `tiles`)
     for a non-hetero net, keeping its graph free of tile ops.
     **Versioned** (`board_sample(version=)`, `FEATURE_VERSIONS`, widths from
-    `dims(version)`; `GraphNetConfig.feature_version` is what every consumer
+    `dims(version, incidence)`; `GraphNetConfig.feature_version` is what every consumer
     threads, and a frozen anchor pins its own in its sidecar). Version 1 is the
     original, kept byte-exact (digest-pinned in `tests/test_architectures.py`) —
     the az0 anchor and every v1 checkpoint read exactly those bytes.
@@ -102,9 +102,10 @@ uses them.
     harmless *because the key is the whole payload*: two slots tie only when
     their feature rows are identical, so which one lands first cannot change the
     output. Sorting by pips (the plan's first candidate) would *not* do — it
-    ties 234 slots per 20 boards between hexes with different payloads, where
-    order would then fall back to index; the full-payload key ties 14, all of
-    them genuinely interchangeable. The tradeoff bought: no geometric slot
+    ties roughly an order of magnitude more slots between hexes with
+    *different* payloads (board-dependent counts, not reproducible constants),
+    where order would then fall back to index; the full-payload key's ties are
+    all genuinely interchangeable. The tradeoff bought: no geometric slot
     identity — the net cannot tell which incident hex sits in which direction
     (unrecoverable in any equivariant featurization, since there is no canonical
     frame), and the "slot" index it reads is a lexicographic rank. Coast

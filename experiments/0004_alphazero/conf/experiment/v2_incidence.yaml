@@ -1,0 +1,36 @@
+# @package _global_
+defaults:
+  - override /net: gnn
+  - override /teacher: heuristic
+  - override /search: scale
+  - override /selfplay: scale
+  - override /optim: scale
+  - override /value_blend: scale
+  - override /arena: scale
+net:
+  width: 96
+  layers: 4
+  feature_version: 2
+  incidence: true
+# v2_incidence: v2_base + Task 3's incidence block (per-vertex un-summed
+# incident-hex features -- per-tile and per-number identity, no new message
+# passing). The structure-free control: it restores per-tile information at
+# zero architecture cost, so its head-to-head against v2_base isolates "does
+# per-tile identity help" from "does message passing over hex nodes help"
+# (v2_hetero). Interpretation note: if this arm underperforms, the leading
+# suspect is the slot-rank input geometry (Task 3 -- slots are a
+# lexicographic rank of a hex's own attributes, the only D3-equivariant
+# option; there is no canonical geometric direction to fall back to), not a
+# verdict on per-tile identity itself.
+n_iterations: 300
+checkpoint_every: 10
+selfplay:
+  batch: 512
+  persistent: true
+  temperature_moves: 30
+  pcr_full_prob: 0.25
+  pcr_fast_sims: 16
+search:
+  num_simulations: 128
+replay:
+  buffer_max: 200000

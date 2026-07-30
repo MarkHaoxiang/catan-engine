@@ -1,0 +1,31 @@
+# @package _global_
+defaults:
+  - override /net: gnn
+  - override /teacher: heuristic
+  - override /search: scale
+  - override /selfplay: scale
+  - override /optim: scale
+  - override /value_blend: scale
+  - override /arena: scale
+net:
+  width: 96
+  layers: 6
+  feature_version: 2
+# v2_deep: v2_base + 2 more message-passing layers (4 -> 6). The reach
+# control: v2_incidence and v2_hetero both give a node new *information* it
+# could not otherwise reach; this arm adds no new information, only more
+# rounds of propagation over the same v2 features, so its head-to-head
+# against v2_base isolates whether the other arms' effect (if any) is really
+# about information vs. just more reach/capacity.
+n_iterations: 300
+checkpoint_every: 10
+selfplay:
+  batch: 512
+  persistent: true
+  temperature_moves: 30
+  pcr_full_prob: 0.25
+  pcr_fast_sims: 16
+search:
+  num_simulations: 128
+replay:
+  buffer_max: 200000

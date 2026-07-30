@@ -109,6 +109,36 @@ def test_0004_experiment_presets_compose() -> None:
         run.compose_config([f"+experiment={name}"])
 
 
+def test_0004_v2_four_arm_study_presets_compose() -> None:
+    # The featurization-v2 four-arm study (docs/superpowers/plans/
+    # 2026-07-30-featurization-v2.md, Task 5): each arm changes exactly one
+    # knob on top of v2_base, isolated here so a future edit can't quietly
+    # merge two arms' deltas together.
+    run = load_run("0004_alphazero")
+    base = run.compose_config(["+experiment=v2_base"])
+    assert base.net.kind == "gnn" and base.net.feature_version == 2
+    assert (
+        not base.net.incidence
+        and base.net.layers == 4
+        and base.net.preset == "gn_global"
+    )
+
+    incidence = run.compose_config(["+experiment=v2_incidence"])
+    assert incidence.net.feature_version == 2 and incidence.net.incidence
+    assert (
+        incidence.net.layers == base.net.layers
+        and incidence.net.preset == base.net.preset
+    )
+
+    deep = run.compose_config(["+experiment=v2_deep"])
+    assert deep.net.feature_version == 2 and deep.net.layers == base.net.layers + 2
+    assert not deep.net.incidence and deep.net.preset == base.net.preset
+
+    hetero = run.compose_config(["+experiment=v2_hetero"])
+    assert hetero.net.feature_version == 2 and hetero.net.preset == "gn_hetero"
+    assert not hetero.net.incidence and hetero.net.layers == base.net.layers
+
+
 def test_0004_scale_presets_compose() -> None:
     # The nano/small/medium budget tiers share one recipe (gnn + warm-up + Canopy
     # q-blend, no chance/EV, B256, sims64) and differ only in budget. Fast guard

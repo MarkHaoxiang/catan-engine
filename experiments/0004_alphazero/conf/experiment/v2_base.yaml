@@ -1,0 +1,32 @@
+# @package _global_
+defaults:
+  - override /net: gnn
+  - override /teacher: heuristic
+  - override /search: scale
+  - override /selfplay: scale
+  - override /optim: scale
+  - override /value_blend: scale
+  - override /arena: scale
+net:
+  width: 96
+  layers: 4
+  feature_version: 2
+# v2_base: scale2's recipe (persistent self-play, opening-temperature anneal,
+# PCR) on v2 features -- Tasks 1/2's global repairs (own hand/dev composition,
+# free_roads, longest_road_len, pending_discard) and readout/norm
+# ([max,sum,std] + ctx LayerNorm), both gated by feature_version>=2. The
+# four-arm study's reference arm: v2_incidence/v2_deep/v2_hetero each isolate
+# one lever on top of this recipe, judged by a paired 400-game head-to-head
+# vs this arm (docs/superpowers/gpu-day-checklist.md).
+n_iterations: 300
+checkpoint_every: 10
+selfplay:
+  batch: 512
+  persistent: true
+  temperature_moves: 30
+  pcr_full_prob: 0.25
+  pcr_fast_sims: 16
+search:
+  num_simulations: 128
+replay:
+  buffer_max: 200000
