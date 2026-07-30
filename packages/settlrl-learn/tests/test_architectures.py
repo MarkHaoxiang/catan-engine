@@ -55,6 +55,37 @@ def _mid_game(n_players: int, steps: int = 150, seed: int = 7) -> Board:
     return layout, state
 
 
+_V2_BLOCK = 14  # the version-2 tail of `glob` (own hand, dev hand, turn state)
+
+
+def _engage_v2(state: BoardState) -> BoardState:
+    """Set every version-2 global to a nonzero value from seat 0's view (and the
+    opponent Longest Road slot from seat 1's), so an invariance test cannot pass on
+    a block of zeros: mid-game random play leaves 9 of the 14 at 0."""
+    resources = np.zeros_like(np.asarray(state.player_resources))
+    resources[0], resources[1] = [1, 2, 1, 3, 4], [2, 1, 1, 1, 1]
+    dev = np.zeros_like(np.asarray(state.dev_hand))
+    dev[0], dev[1] = [2, 1, 1, 1, 1], [1, 1, 1, 1, 1]
+    discard = np.zeros_like(np.asarray(state.pending_discard))
+    discard[0], discard[1] = 4, 2
+    u8 = state.free_roads.dtype
+    return state._replace(
+        player_resources=jnp.asarray(resources),
+        dev_hand=jnp.asarray(dev),
+        pending_discard=jnp.asarray(discard),
+        free_roads=jnp.asarray(2, u8),
+        current_player=jnp.asarray(0, state.current_player.dtype),
+        longest_road_owner=jnp.asarray(0, state.longest_road_owner.dtype),
+        longest_road_len=jnp.asarray(7, state.longest_road_len.dtype),
+    )
+
+
+def _position(version: int, n_players: int = 4) -> Board:
+    """The invariance fixture: v1 as played, v2 with its added globals engaged."""
+    layout, state = _mid_game(n_players)
+    return layout, (_engage_v2(state) if version >= 2 else state)
+
+
 def _gnn() -> GNNModel:
     return GNNModel(jax.random.key(0), out_dim=_OUT, width=_W, depth=1, layers=2)
 
@@ -119,7 +150,7 @@ def test_graphnet_presets_are_invariant(preset: str, version: int) -> None:
     # The configurable GraphNet keeps both invariances across every lever
     # (attention, GraphNorm spanning the node axis, the global node, JK) -- it
     # uses only symmetric aggregations and relative features, no absolute PE.
-    layout, state = _mid_game(4)
+    layout, state = _position(version)
     cfg = PRESETS[preset]._replace(
         width=8, layers=2, head_depth=1, feature_version=version
     )
@@ -200,7 +231,7 @@ def test_aznet_value_invariant_policy_equivariant_under_board_symmetry(
     # symmetry, and the policy is *equivariant* -- a settlement-at-v action maps
     # to settlement-at-(sigma v), road-at-e to road-at-(sigma e), robber-tile-t
     # to sigma(t) -- so policy(sigma . board)[action_permutation] == policy(board).
-    layout, state = _mid_game(4)
+    layout, state = _position(version)
     net = _aznet(preset, version)
     p = jnp.int32(0)
     vv, pp = net(board_sample(layout, state, p, version=version))
@@ -218,7 +249,7 @@ def test_aznet_value_invariant_policy_equivariant_under_board_symmetry(
 def test_aznet_value_and_policy_invariant_under_player_relabel(
     preset: str, version: int
 ) -> None:
-    layout, state = _mid_game(4)
+    layout, state = _position(version)
     net = _aznet(preset, version)
     vv, pp = net(board_sample(layout, state, jnp.int32(0), version=version))
     v0, pol0 = np.asarray(vv), np.asarray(pp)
@@ -461,8 +492,15 @@ def test_v2_reveals_turn_state(field: str) -> None:
 def test_v2_features_are_symmetry_and_relabel_invariant() -> None:
     # The v2 additions are all player-relative, so the featurization keeps both
     # invariances exactly (the nets built on it are covered above).
-    layout, state = _mid_game(4)
+    layout, state = _position(version=2)
     base = board_sample(layout, state, jnp.int32(0), version=2)
+    # vacuity guard: no added dim may sit at 0 in *both* seat views, or a broken
+    # current-player mask / Longest-Road holder mapping would pass unnoticed.
+    seat1 = board_sample(layout, state, jnp.int32(1), version=2)
+    engaged = (np.asarray(base.glob)[-_V2_BLOCK:] != 0) | (
+        np.asarray(seat1.glob)[-_V2_BLOCK:] != 0
+    )
+    assert bool(engaged.all())
     for sym in board_symmetries():
         l2, s2 = apply_symmetry(layout, state, sym)
         rot = board_sample(l2, s2, jnp.int32(0), version=2)
@@ -474,3 +512,23 @@ def test_v2_features_are_symmetry_and_relabel_invariant() -> None:
                 layout, relabel_players(state, perm), jnp.int32(perm[q]), version=2
             )
             assert np.allclose(_flat(mine), _flat(other), atol=1e-6)
+
+
+def test_v2_block_pins_its_layout_and_scaling() -> None:
+    # The 14 appended values, spelled out: this pins the divisors (hand /5, dev /3,
+    # free roads /2, road length /MAX_ROADS, discard /5), the slot order, the
+    # "my turn" mask on free_roads (seat 1 reads 0) and the own/opponent split of
+    # the Longest Road length (seat 0 holds it at 7 roads; seat 1 sees it opposite).
+    # Tasks 2/3 must not perturb these silently.
+    layout, state = _position(version=2)
+    third = 1.0 / 3.0
+    expected = {
+        # own hand /5 ++ own dev hand /3 ++ [free roads /2, own LR, opponent LR, discard /5]
+        0: [*[0.2, 0.4, 0.2, 0.6, 0.8], *[2 * third, third, third, third, third],
+            1.0, 7.0 / 15.0, 0.0, 0.8],
+        1: [*[0.4, 0.2, 0.2, 0.2, 0.2], *[third, third, third, third, third],
+            0.0, 0.0, 7.0 / 15.0, 0.4],
+    }  # fmt: skip
+    for p, want in expected.items():
+        block = np.asarray(board_sample(layout, state, jnp.int32(p), version=2).glob)
+        np.testing.assert_allclose(block[-_V2_BLOCK:], want, atol=1e-6)

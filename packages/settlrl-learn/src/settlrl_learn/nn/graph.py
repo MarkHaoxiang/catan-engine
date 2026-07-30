@@ -119,7 +119,7 @@ production terms use it, so the two readouts of the same quantity share a scale.
 
 
 def _node_features(
-    layout: BoardLayout, state: BoardState, p: IntScalar, version: int = 1
+    layout: BoardLayout, state: BoardState, p: IntScalar, version: int
 ) -> Float[Array, f"v={N_VERTICES} node_f"]:
     owner = state.vertex_owner.astype(jnp.int32)
     mine = owner == p + 1
@@ -198,16 +198,9 @@ _DISCARD_SCALE = 5.0
 
 
 def _own_features_v2(state: BoardState, p: IntScalar) -> Float[Array, "own_f"]:
-    """Version-2 globals: the perspective player's *composition* (which resources,
-    which dev cards) and the turn-state counters v1 dropped entirely.
-
-    All player-relative, hence relabel-invariant. Longest Road: the engine stores
-    only the award holder's length (``longest_road_len``), so own/opponent lengths
-    are read off the holder rather than re-running the per-player DFS -- which the
-    engine gates hard for cost and which this function pays on *every* search leaf.
-    ``free_roads`` is game-level (it belongs to whoever is on turn), so it is
-    masked by "it is my turn" to stay own-relative.
-    """
+    """Version-2 globals, all relative to ``p``: own hand (5), own dev hand (5),
+    own owed free roads, the Longest Road length held by ``p`` / by an opponent (0
+    when the award is unheld), own owed discard."""
     mine = state.current_player.astype(jnp.int32) == p
     resources = state.player_resources[p].astype(jnp.float32) / _HAND_SCALE
     dev = state.dev_hand[p].astype(jnp.float32) / _DEV_SCALE
@@ -232,7 +225,7 @@ def _own_features_v2(state: BoardState, p: IntScalar) -> Float[Array, "own_f"]:
 
 
 def _global_features(
-    layout: BoardLayout, state: BoardState, p: IntScalar, version: int = 1
+    layout: BoardLayout, state: BoardState, p: IntScalar, version: int
 ) -> Float[Array, "global_f"]:
     held = state.player_resources.astype(jnp.float32).sum(axis=0)
     bank = 19.0 - held
@@ -319,9 +312,10 @@ def board_sample(
 
 
 @cache
-def dims(version: int = 1) -> tuple[int, int, int, int]:
+def dims(version: int) -> tuple[int, int, int, int]:
     """``(node, edge, global, tile)`` feature widths at ``version`` (the topology
-    dims ``N_VERTICES`` / ``N_DIR_EDGES`` / ``N_TILES`` are fixed)."""
+    dims ``N_VERTICES`` / ``N_DIR_EDGES`` / ``N_TILES`` are fixed). Required
+    argument: a default would cache the same version under two keys."""
     from settlrl_engine.board import make_board
 
     layout, state = make_board(batch_size=1, n_players=2)

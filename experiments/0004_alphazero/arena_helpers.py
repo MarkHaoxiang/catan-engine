@@ -125,15 +125,16 @@ def run_bench(run: Run, cfg: AlphaZeroConfig) -> None:
     from settlrl_learn.training import GNNBackend, bench_selfplay
 
     net, netcfg = load_anchor(cfg.bench.anchor)
-    if (netcfg.width, netcfg.layers, netcfg.head_depth) != (
-        cfg.net.width, cfg.net.layers, cfg.net.depth,
+    if (netcfg.width, netcfg.layers, netcfg.head_depth, netcfg.feature_version) != (
+        cfg.net.width, cfg.net.layers, cfg.net.depth, cfg.net.feature_version,
     ):  # fmt: skip
         raise ValueError(
             f"anchor {cfg.bench.anchor!r} (width={netcfg.width}, "
-            f"layers={netcfg.layers}, head_depth={netcfg.head_depth}) does not "
+            f"layers={netcfg.layers}, head_depth={netcfg.head_depth}, "
+            f"feature_version={netcfg.feature_version}) does not "
             f"match preset cfg.net (width={cfg.net.width}, layers={cfg.net.layers}, "
-            f"depth={cfg.net.depth}) -- the run manifest would misdescribe the "
-            "measured workload"
+            f"depth={cfg.net.depth}, feature_version={cfg.net.feature_version}) -- "
+            "the run manifest would misdescribe the measured workload"
         )
     s = cfg.search
     backend = GNNBackend(

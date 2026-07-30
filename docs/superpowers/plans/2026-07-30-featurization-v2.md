@@ -33,7 +33,7 @@ The probe ran with the seam fix: root_q sits ~2–3pp of win-prob below the Gumb
 
 ### Task 5: Study configs + goldens + GPU-day checklist
 
-`conf/experiment/` variants for the four-arm study, all on v2 features: `v2_base`, `v2_incidence`, `v2_deep` (+2 layers), `v2_hetero` (+HNHN degree-norm — port per the research's α/β parameterization). New v2 flag-off goldens. The GPU-day checklist file (scratchpad → docs/): seam-fix confirm (search_step_ms), layout-transpose check, bf16 probe, width sweep {96,144,192} re-priced at the post-seam-fix NN share (~26% of a sim, not 15% — the panel's w144 arithmetic needs redoing), then the four-arm head-to-heads at 400 games paired.
+`conf/experiment/` variants for the four-arm study, all on v2 features: `v2_base`, `v2_incidence`, `v2_deep` (+2 layers), `v2_hetero` (+HNHN degree-norm — port per the research's α/β parameterization). New v2 flag-off goldens. The GPU-day checklist file (scratchpad → docs/): seam-fix confirm (search_step_ms), layout-transpose check, bf16 probe, width sweep {96,144,192} re-priced at the post-seam-fix NN share (~26% of a sim, not 15% — the panel's w144 arithmetic needs redoing), price the featurizer DFS on GPU — the CPU number (4-8% of a forward) does not close it, then the four-arm head-to-heads at 400 games paired.
 
 ---
 

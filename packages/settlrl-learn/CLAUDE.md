@@ -64,10 +64,17 @@ uses them.
     (v1 left node pips raw). Every count is divided by a "large but ordinary"
     value for that quantity (the divisors carry their reasoning at the constant)
     because nothing normalises `glob`. The Longest Road entries read the *award
-    holder's* stored length rather than re-running `longest_road_length` per
-    player: the featurizer runs on every search leaf, and that DFS is what the
-    engine gates hardest — so a length below the 5-road award threshold is
-    invisible by design (road *counts* are in v1's per-player block).
+    holder's* stored length rather than calling `longest_road_length` per player.
+    The reason is **structural, not cost** (the DFS measures 4–8% of a forward,
+    CPU B=128): `awards.road_build_gate` runs the DFS only at ≥5 own roads, so the
+    engine never computes a sub-threshold length and there is no per-player vector
+    to reuse — producing one would mean loosening the engine's own perf gate.
+    Two blind spots follow, both by design: a trail below the 5-road award
+    threshold reads 0 (road *counts* are in v1's per-player block), and so does a
+    rulebook tie — a 2+ way tie among non-holders leaves the award unheld
+    (`awards._reassign_award`), which zeroes the stored length, so both slots read
+    0 even when the tied trails are 7 roads long.
+    GPU pricing of the featurizer DFS is on the Task 5 checklist.
     **Gotcha:** `tile_number` reaches the net only via `tile_pips` (`6 − |7 − n|`),
     a many-to-one collapse (6≡8, 5≡9, 4≡10, 3≡11, 2≡12) — number identity and
     same-number income correlation (e.g. two 6s vs. a 6 and an 8) are
