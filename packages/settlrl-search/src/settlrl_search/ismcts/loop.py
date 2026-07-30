@@ -29,7 +29,6 @@ from .descent import (
     _descend,
     _determinize,
     _evaluate,
-    _interior_logits,
     _legal_mask,
     _value,
 )
@@ -85,12 +84,11 @@ def _run(
         # SELECT (descend): walk to an unexpanded leaf (no value work in the loop).
         walk = _descend(cfg, tree, a_root, walk, layout, player)
 
-        # EVALUATE: score the leaf once, here, not per descent step.
-        value, mover = _evaluate(cfg, layout, walk, player)
+        # EVALUATE: score the leaf once, here, not per descent step — value and
+        # the node's interior prior from one evaluation of the leaf state.
+        value, mover, leaf_prior = _evaluate(cfg, layout, walk, player)
 
-        # EXPAND: attach the new leaf node (its interior prior is a forward on the
-        # leaf state; a no-op when the descent grew no node).
-        leaf_prior = _interior_logits(cfg, layout, walk.state, player)
+        # EXPAND: attach the new leaf node (a no-op when the descent grew no node).
         tree = _expand(tree, walk, value, mover, leaf_prior)
 
         # BACKUP: add the leaf value to every edge on the path.

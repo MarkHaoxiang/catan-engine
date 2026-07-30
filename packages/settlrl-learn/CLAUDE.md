@@ -31,6 +31,11 @@ uses them.
   `nn/__init__`:
   - `nn/mlp.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts
     it onto the search's `value`/`prior` seams). Plain-JAX, root-importable.
+    Both adapters (`make_az`, `gnn_seams`) return their prior as a
+    `settlrl_search.policy.ValuePrior` — a prior that also serves the value off
+    the *same* forward. The search evaluates a leaf through it, so one trunk pass
+    covers both heads: XLA does not merge two separate calls (evidence and
+    numbers in settlrl-search/CLAUDE.md).
   - `nn/graph.py` — the board-as-graph featurization (`board_sample` → a
     `Sample` of per-node/-edge/global features + per-hex `tiles` + the engineered
     vector, fixed topology as module constants). `tiles` (the per-hex node

@@ -99,6 +99,21 @@ constants live in `_common.py`, the trade/lookahead/`num_trees` wrapper in
 `mcts`/`smcts`/`ismcts`/`lookahead` quartet (2026-06-17) then the `mctx` engine
 behind it (2026-06-19, 742b94b). ~5–6 ms/move (B=1 CPU; was 7.4 with mctx).
 
+**One leaf evaluation per simulation.** A leaf needs both a value and an
+expansion prior, and XLA does **not** merge two calls of the same shared-trunk
+net on the same state (bisected 2026-07-30: trivial featurizations merge, the
+real `board_sample` does not — a dot census found two complete trunks in the
+simulation `while` body). So a net hands the search one `ValuePrior` seam
+(`policy.py`) whose `with_value` returns both from a single forward;
+`descent._value_and_logits` takes it when the prior offers one and otherwise
+calls the two seams as before (the heuristic-leaf + tier-prior path is
+unchanged). Measured on a `gn_global` 96×4 net, 4 sims: 211.7 → 141.4 MFLOP per
+compiled search (2.99 → 2.00 forwards), 18 → 9 in-loop node dots; with
+`expected_rolls`, 983.9 → 913.5 MFLOP (the roll EV's 11 value calls stay).
+Outputs are bit-identical — the same graph, emitted once — and settlrl-learn's
+`tests/test_leaf_seam.py` censuses the in-loop dots against a deliberately split
+seam, so the duplication cannot come back silently.
+
 **The leaf is the ceiling.** The binding constraint is the stationary heuristic
 leaf, not search machinery: win rate vs lookahead does *not* climb with sims (64
 *loses*), so the lever is the leaf (experiment 0003 / settlrl-learn) and prior

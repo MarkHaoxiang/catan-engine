@@ -25,6 +25,8 @@ from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, KeyScalar, Player
 from settlrl_engine.env import N_FLAT, Observation
 
+from settlrl_search.value import Value
+
 FlatMask = Bool[Array, f"flat={N_FLAT}"]
 """Legality of every concrete flat action for the acting player (one game)."""
 
@@ -69,6 +71,22 @@ class PolicyPrior(Protocol):
     def __call__(
         self, layout: BoardLayout, state: BoardState, player: Player
     ) -> Float[Array, f"flat={N_FLAT}"]: ...
+
+
+@runtime_checkable
+class ValuePrior(PolicyPrior, Protocol):
+    """A :class:`PolicyPrior` that can also return the state's value.
+
+    ``with_value`` must return exactly ``(paired ValueFunction(...),
+    self(...))`` — it is the same pair, from one evaluation. The search calls
+    it wherever it needs both for one state (the leaf), so a shared-trunk net
+    runs its forward once instead of twice; a prior without it is called
+    alongside the value function as before.
+    """
+
+    def with_value(
+        self, layout: BoardLayout, state: BoardState, player: Player
+    ) -> tuple[Value, Float[Array, f"flat={N_FLAT}"]]: ...
 
 
 @runtime_checkable

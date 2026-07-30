@@ -7,6 +7,7 @@ exported artifact without any training dependencies.
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 from collections.abc import Sequence
 from pathlib import Path
@@ -20,7 +21,7 @@ from settlrl_agents.value import Value, ValueFunction
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar, KeyScalar
 from settlrl_engine.env import N_FLAT
-from settlrl_search.policy import PolicyPrior
+from settlrl_search.policy import PolicyPrior, ValuePrior
 
 from settlrl_learn.features import FEATURE_DIM, features
 
@@ -122,7 +123,25 @@ def init_az_params(key: KeyScalar, hidden: Sequence[int] = (64, 64)) -> AZParams
     return AZParams(trunk, (wv, jnp.zeros((1,))), (wp, jnp.zeros((N_FLAT,))))
 
 
-def make_az(params: AZParams) -> tuple[ValueFunction, PolicyPrior]:
+@dataclasses.dataclass(frozen=True)
+class _AZPrior:
+    """The AZ net's policy seam as a :class:`~settlrl_search.policy.ValuePrior`,
+    so the search takes both heads off one trunk pass where it needs both."""
+
+    params: AZParams
+
+    def __call__(
+        self, layout: BoardLayout, state: BoardState, player: IntScalar
+    ) -> Float[Array, f"flat={N_FLAT}"]:
+        return az_forward(self.params, features(layout, state, player))[1]
+
+    def with_value(
+        self, layout: BoardLayout, state: BoardState, player: IntScalar
+    ) -> tuple[Value, Float[Array, f"flat={N_FLAT}"]]:
+        return az_forward(self.params, features(layout, state, player))
+
+
+def make_az(params: AZParams) -> tuple[ValueFunction, ValuePrior]:
     """Adapt one AZ net onto the search seams as ``(value, prior)``; both run
     the shared trunk, so build the search with ``value_scale=2`` (see
     :class:`AZParams`)."""
@@ -130,12 +149,7 @@ def make_az(params: AZParams) -> tuple[ValueFunction, PolicyPrior]:
     def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
         return az_forward(params, features(layout, state, player))[0]
 
-    def prior(
-        layout: BoardLayout, state: BoardState, player: IntScalar
-    ) -> Float[Array, f"flat={N_FLAT}"]:
-        return az_forward(params, features(layout, state, player))[1]
-
-    return value, prior
+    return value, _AZPrior(params)
 
 
 def save_az_params(path: str | Path, params: AZParams) -> None:

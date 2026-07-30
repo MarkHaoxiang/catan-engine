@@ -32,6 +32,7 @@ from settlrl_engine.mechanics.flat import flat_available_for
 from settlrl_engine.ordering import next_category, ordering_mask
 
 from settlrl_search._common import _ILLEGAL, _ROLL_P, _ROLLS, _TIER_LOGITS
+from settlrl_search.policy import ValuePrior
 from settlrl_search.rows import ROW_TYPE
 from settlrl_search.sample import sample_world
 from settlrl_search.value import Value
@@ -90,13 +91,20 @@ def _legal_mask(layout: BoardLayout, state: BoardState) -> _LegalMask:
     return flat_available_for(layout, state).astype(jnp.float32)
 
 
+def _squash(cfg: _Cfg, state: BoardState, player: Player, raw: Value) -> Value:
+    """A raw value-function score in the searcher's frame: ±1 once the mover has
+    won, else tanh-squashed."""
+    terminal = current_player_won(state)
+    win = state.current_player.astype(jnp.int32) == player
+    return jnp.where(
+        terminal, jnp.where(win, 1.0, -1.0), jnp.tanh(raw / cfg.value_scale)
+    )
+
+
 def _value(cfg: _Cfg, layout: BoardLayout, state: BoardState, player: Player) -> Value:
     """Searcher-frame value of a state: ±1 once the mover has won, else the
     tanh-squashed value function."""
-    terminal = current_player_won(state)
-    win = state.current_player.astype(jnp.int32) == player
-    eval_value = jnp.tanh(cfg.value(layout, state, player) / cfg.value_scale)
-    return jnp.where(terminal, jnp.where(win, 1.0, -1.0), eval_value)
+    return _squash(cfg, state, player, cfg.value(layout, state, player))
 
 
 def _step(layout: BoardLayout, state: BoardState, action: _Action) -> BoardState:
@@ -106,14 +114,21 @@ def _step(layout: BoardLayout, state: BoardState, action: _Action) -> BoardState
     return next_state
 
 
-def _interior_logits(
+def _value_and_logits(
     cfg: _Cfg, layout: BoardLayout, state: BoardState, player: Player
-) -> _PriorLogits:
-    """The prior over a freshly expanded node's actions: a learned policy head if
-    one was supplied, else the constant tier table."""
+) -> tuple[Value, _PriorLogits]:
+    """A leaf's searcher-frame value and the prior over its actions (a learned
+    policy head if one was supplied, else the constant tier table).
+
+    Both come from a single evaluation when the prior is a
+    :class:`~settlrl_search.policy.ValuePrior` — the shared-trunk nets' seam —
+    instead of one forward per head."""
     if cfg.prior is None:
-        return _TIER_LOGITS
-    return cfg.prior(layout, state, player)
+        return _value(cfg, layout, state, player), _TIER_LOGITS
+    if isinstance(cfg.prior, ValuePrior):
+        raw, logits = cfg.prior.with_value(layout, state, player)
+        return _squash(cfg, state, player, raw), logits
+    return _value(cfg, layout, state, player), cfg.prior(layout, state, player)
 
 
 def _roll_ev(
@@ -322,9 +337,10 @@ def _descend(
 
 def _evaluate(
     cfg: _Cfg, layout: BoardLayout, walk: _Descent, player: Player
-) -> tuple[Value, Player]:
-    # EVALUATE: score the descent's leaf once, here, rather than on every step.
-    # The leaf's mover is stored on the new node for the backup frame.
+) -> tuple[Value, Player, _PriorLogits]:
+    # EVALUATE: score the descent's leaf once, here, rather than on every step —
+    # value and expansion prior together, so a shared-trunk net evaluates the leaf
+    # state once. The leaf's mover is stored on the new node for the backup frame.
     #
     # `_step` already applies one sampled dice outcome, so the plain leaf value is
     # a single-sample roll. With `expected_rolls`, a roll-edge leaf instead takes
@@ -333,8 +349,9 @@ def _evaluate(
     # (not just a grown edge) also covers a `max_depth` truncation onto a roll.
     leaf = walk.state
     mover = agent_selection_single(leaf).astype(jnp.int32)
+    value, logits = _value_and_logits(cfg, layout, leaf, player)
     if not cfg.expected_rolls:
-        return _value(cfg, layout, leaf, player), mover
+        return value, mover, logits
     # prev_state is carried (non-None) iff cfg.expected_rolls, which holds here.
     prev_state = walk.prev_state
     assert prev_state is not None
@@ -343,6 +360,6 @@ def _evaluate(
     value = jnp.where(
         roll_leaf & ~current_player_won(leaf),
         _roll_ev(cfg, layout, prev_state, player),
-        _value(cfg, layout, leaf, player),
+        value,
     )
-    return value, mover
+    return value, mover, logits

@@ -8,6 +8,8 @@ Training-side (equinox/jraph): not imported by the package root.
 
 from __future__ import annotations
 
+import dataclasses
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -16,7 +18,7 @@ from settlrl_agents.value import Value, ValueFunction
 from settlrl_engine.board.layout import EDGE_V, TILE_V, BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar
 from settlrl_engine.env import N_FLAT
-from settlrl_search.policy import PolicyPrior
+from settlrl_search.policy import ValuePrior
 
 from settlrl_learn.nn import action_layout as al
 from settlrl_learn.nn.graph import Sample, board_sample
@@ -92,7 +94,26 @@ class BoardGNN(eqx.Module):
         return self.value(ctx)[0], self.policy(h, ctx, h_t)
 
 
-def gnn_seams(model: BoardGNN) -> tuple[ValueFunction, PolicyPrior]:
+@dataclasses.dataclass(frozen=True)
+class _GNNPrior:
+    """The GNN's policy seam as a :class:`~settlrl_search.policy.ValuePrior`, so
+    the search takes both heads off one forward where it needs both (the leaf)."""
+
+    model: BoardGNN
+    het: bool
+
+    def __call__(
+        self, layout: BoardLayout, state: BoardState, player: IntScalar
+    ) -> Float[Array, f"flat={N_FLAT}"]:
+        return self.model(board_sample(layout, state, player, with_tiles=self.het))[1]
+
+    def with_value(
+        self, layout: BoardLayout, state: BoardState, player: IntScalar
+    ) -> tuple[Value, Float[Array, f"flat={N_FLAT}"]]:
+        return self.model(board_sample(layout, state, player, with_tiles=self.het))
+
+
+def gnn_seams(model: BoardGNN) -> tuple[ValueFunction, ValuePrior]:
     """Adapt the GNN onto the search seams as ``(value, prior)``; both run the
     board-graph forward. Build the search with ``value_scale=2``. Tiles are
     featurized only for a heterogeneous net (else the trunk ignores them, so we
@@ -102,9 +123,4 @@ def gnn_seams(model: BoardGNN) -> tuple[ValueFunction, PolicyPrior]:
     def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
         return model(board_sample(layout, state, player, with_tiles=het))[0]
 
-    def prior(
-        layout: BoardLayout, state: BoardState, player: IntScalar
-    ) -> Float[Array, f"flat={N_FLAT}"]:
-        return model(board_sample(layout, state, player, with_tiles=het))[1]
-
-    return value, prior
+    return value, _GNNPrior(model, het)
