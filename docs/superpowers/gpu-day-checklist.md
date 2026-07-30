@@ -126,6 +126,13 @@ verdict on per-tile identity). Record win rates + Elo deltas + n=400 in
 any strength conclusion (repo doctrine: strength claims gate through a
 recorded match, never a reading of it).
 
+No CLI runs a checkpoint-vs-checkpoint match today — `build_net_opponents`/
+`run_final_gauntlet` only play a net against `POLICIES` names or other
+`net_opponents` *inside* a training run's own arena. The paired-match verdict
+step needs a small script beside `anchors.py` (load two checkpoints via
+`load_anchor`, build both `play_agent` specs, drive them through
+`arena_spec` directly) before this item is runnable.
+
 ## 6. 512-vs-1024 batch re-measurement (the sample-yield wobble note)
 
 ```bash
@@ -152,11 +159,14 @@ silently.
 `experiments/0004_alphazero/conf/experiment/scale2_long.yaml`'s comment
 derives a 9.8% arena wall-share budget (`arena.games=64`, `arena.every=150`)
 from the pre-run cost model (`295s / (150 * 20s/iter) ~= 9.8%`). The live
-run's realized wall-share measured 16.1% instead — pull the actual per-round
-arena duration and per-iteration wall-clock from the run's `metrics.jsonl` /
-wandb history and recompute the realized share directly (no new script
-needed, just the arithmetic against logged timestamps) rather than trusting
-the pre-run estimate.
+run's realized wall-share measured **16.1%** instead — measured from
+`runs/0004_alphazero/2026-07-29T122854Z`'s `metrics.jsonl`: sum of logged
+`t_arena` over wall-clock time across the run's first 1719 iterations (cite
+that run dir + iteration count as the provenance if this number is quoted
+again). Pull the actual per-round arena duration and per-iteration wall-clock
+from that same `metrics.jsonl` / wandb history and recompute the realized
+share directly (no new script needed, just the arithmetic against logged
+timestamps) rather than trusting the pre-run estimate.
 
 **Decision:** if 16.1% is confirmed (not an artifact of a cold-start
 iteration or a one-off slow round), retune `arena.games`/`arena.every` in

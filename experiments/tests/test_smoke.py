@@ -112,31 +112,53 @@ def test_0004_experiment_presets_compose() -> None:
 def test_0004_v2_four_arm_study_presets_compose() -> None:
     # The featurization-v2 four-arm study (docs/superpowers/plans/
     # 2026-07-30-featurization-v2.md, Task 5): each arm changes exactly one
-    # knob on top of v2_base, isolated here so a future edit can't quietly
-    # merge two arms' deltas together.
+    # net knob on top of v2_base (net.incidence / net.layers / net.preset).
+    # Two things are checked: each arm's own delta (below), and -- the
+    # isolation guarantee -- that popping just those three known-varying
+    # `net` keys leaves *everything else* identical across all four dumped
+    # configs: at minimum selfplay.{batch,persistent,pcr_full_prob,
+    # pcr_fast_sims,temperature_moves}, search.{num_simulations,max_considered,
+    # expected_rolls,chance_nodes}, optim.*, replay.buffer_max, n_iterations,
+    # checkpoint_every, final_games, and net.width (net.layers too, across the
+    # three non-deep arms) -- but the dump-and-pop form checks the *whole*
+    # config, not just this list, so a future edit to any field (including one
+    # not named here) that silently drifted one arm from the shared recipe
+    # fails this test too.
     run = load_run("0004_alphazero")
-    base = run.compose_config(["+experiment=v2_base"])
+    names = ["v2_base", "v2_incidence", "v2_deep", "v2_hetero"]
+    cfgs = {name: run.compose_config([f"+experiment={name}"]) for name in names}
+
+    base, incidence, deep, hetero = (cfgs[n] for n in names)
     assert base.net.kind == "gnn" and base.net.feature_version == 2
     assert (
         not base.net.incidence
         and base.net.layers == 4
         and base.net.preset == "gn_global"
     )
-
-    incidence = run.compose_config(["+experiment=v2_incidence"])
     assert incidence.net.feature_version == 2 and incidence.net.incidence
     assert (
         incidence.net.layers == base.net.layers
         and incidence.net.preset == base.net.preset
     )
-
-    deep = run.compose_config(["+experiment=v2_deep"])
     assert deep.net.feature_version == 2 and deep.net.layers == base.net.layers + 2
     assert not deep.net.incidence and deep.net.preset == base.net.preset
-
-    hetero = run.compose_config(["+experiment=v2_hetero"])
     assert hetero.net.feature_version == 2 and hetero.net.preset == "gn_hetero"
     assert not hetero.net.incidence and hetero.net.layers == base.net.layers
+
+    varying_net_keys = {"incidence", "layers", "preset"}
+    stripped = {}
+    for name, cfg in cfgs.items():
+        dump = cfg.dump()
+        dump["net"] = {
+            k: v for k, v in dump["net"].items() if k not in varying_net_keys
+        }
+        stripped[name] = dump
+    reference = stripped[names[0]]
+    for name in names[1:]:
+        assert stripped[name] == reference, (
+            f"{name} drifted from v2_base outside its declared delta "
+            f"({varying_net_keys} within `net`) -- arm isolation broken"
+        )
 
 
 def test_0004_scale_presets_compose() -> None:
