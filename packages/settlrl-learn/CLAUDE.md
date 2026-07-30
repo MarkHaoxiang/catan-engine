@@ -45,6 +45,11 @@ uses them.
     features) and the vertex↔hex incidence (`VT_V`/`VT_T`) feed the *heterogeneous*
     trunk; `board_sample(with_tiles=False)` skips them (a constant-zero `tiles`)
     for a non-hetero net, keeping its graph free of tile ops.
+    **Gotcha:** `tile_number` reaches the net only via `tile_pips` (`6 − |7 − n|`),
+    a many-to-one collapse (6≡8, 5≡9, 4≡10, 3≡11, 2≡12) — number identity and
+    same-number income correlation (e.g. two 6s vs. a 6 and an 8) are
+    unrepresentable in these v1 features. Fix vehicle: a featurization-v2 pass
+    (not yet scheduled), not a patch here.
   - `nn/architectures.py` — the equinox architectures over it (`mlp_engineered`
     / `mlp_flat` / `deepset` / `gnn`, via `make_model`); experiment 0003
     composes them. `deepset`/`gnn` are invariant under the board's symmetry

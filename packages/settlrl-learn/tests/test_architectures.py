@@ -24,9 +24,10 @@ from _symmetry import (
 )
 from settlrl_engine.board import Board
 from settlrl_engine.env import N_FLAT, ActionType, BatchedSettlrlEnv
+from settlrl_learn.features import features
 from settlrl_learn.nn.architectures import DeepSetModel, GNNModel, MLPModel
 from settlrl_learn.nn.board_gnn import BoardGNN
-from settlrl_learn.nn.graph import board_sample
+from settlrl_learn.nn.graph import Sample, board_sample
 from settlrl_learn.nn.graphnet import PRESETS, GraphNet
 from settlrl_learn.training.gnn_backend import gnn_loss
 from settlrl_search.rows import ROW_TYPE
@@ -116,6 +117,38 @@ def test_graphnet_presets_are_invariant(preset: str) -> None:
     assert np.allclose(base, np.asarray(model(relabeled)), atol=1e-3)
 
 
+def test_hetero_off_ignores_tiles() -> None:
+    # `board_sample(with_tiles=False)`'s prose promise: a non-hetero trunk's
+    # graph is free of tile ops, so garbage `tiles` must score identically to
+    # the constant-zero default.
+    layout, state = _mid_game(2)
+    p = jnp.int32(0)
+    base = board_sample(layout, state, p, with_tiles=False)
+    garbage = base._replace(
+        tiles=jax.random.normal(jax.random.key(0), base.tiles.shape)
+    )
+    model = GraphNet(
+        jax.random.key(1), out_dim=_OUT,
+        cfg=PRESETS["gn_global"]._replace(width=_W, layers=1, head_depth=1),
+    )  # fmt: skip
+    assert np.array_equal(np.asarray(model(base)), np.asarray(model(garbage)))
+
+
+def test_mlp_engineered_forward() -> None:
+    # `Sample.extra` contract: `board_sample(features=...)` populates it, and
+    # `MLPModel(engineered=True)` reads it -- pinned once inside the package
+    # (currently only witnessed indirectly by experiment 0003's smoke).
+    layout, state = _mid_game(2)
+    p = jnp.int32(0)
+    sample = board_sample(layout, state, p, features=features)
+    model = MLPModel(
+        jax.random.key(0), out_dim=_OUT, width=_W, depth=1, engineered=True
+    )
+    out = np.asarray(model(sample))
+    assert out.shape == (_OUT,)
+    assert bool(np.all(np.isfinite(out)))
+
+
 def test_flat_mlp_is_not_symmetry_invariant() -> None:
     # The contrast that motivates structure: reordering nodes moves the flat
     # input vector, so the structure-blind MLP cannot be rotation-invariant.
@@ -175,6 +208,24 @@ def test_aznet_value_and_policy_invariant_under_player_relabel(preset: str) -> N
     assert np.allclose(np.asarray(pol)[keep], pol0[keep], atol=1e-3)
 
 
+def test_hetero_net_consumes_tile_features() -> None:
+    # Equivariance/invariance tests alone would pass on a net that ignores
+    # `h_t` entirely (a constant is trivially both). Pin genuine consumption:
+    # zeroing the real per-hex features (vs. leaving them as computed) must
+    # move both heads materially -- both read `h_t`, the policy tile logits
+    # directly (board_gnn.py's `_FactoredPolicy`) and the value via the
+    # trunk's hex-pooled readout.
+    layout, state = _mid_game(4)
+    net = _aznet("gn_hetero")
+    p = jnp.int32(0)
+    real = board_sample(layout, state, p)
+    zeroed = real._replace(tiles=jnp.zeros_like(real.tiles))
+    v_real, pol_real = net(real)
+    v_zero, pol_zero = net(zeroed)
+    assert float(jnp.abs(v_real - v_zero)) > 1e-3
+    assert float(jnp.max(jnp.abs(pol_real - pol_zero))) > 1e-3
+
+
 def test_aznet_runs_on_random_play_boards() -> None:
     # Fast net check (no MCTS): drive the board with a random policy and run the
     # net forward -- correct shapes, finite values.
@@ -207,3 +258,51 @@ def test_gnn_loss_masked_is_finite() -> None:
     loss, aux = gnn_loss(net, samples, target, jnp.zeros(4), mask, jnp.ones(4))
     assert bool(jnp.isfinite(loss))
     assert all(bool(jnp.isfinite(v)) for v in aux.values())
+
+
+def _pcr_batch(batch_size: int, seed: int) -> tuple[Sample, jax.Array, jax.Array]:
+    env = BatchedSettlrlEnv(batch_size=batch_size, n_players=2, seed=seed)
+    key = jax.random.key(seed)
+    for _ in range(20):
+        key, k = jax.random.split(key)
+        env.step(*env.random_actions(k))
+    lo, st = env.board
+    mask = jnp.asarray(env.flat_mask(), jnp.float32)
+    samples = jax.vmap(board_sample)(lo, st, env.agent_selection)
+    target = mask / jnp.clip(mask.sum(-1, keepdims=True), 1.0)  # uniform over legal
+    return samples, target, mask
+
+
+def test_gnn_loss_masks_policy_by_train_policy() -> None:
+    # The loss side of PCR (mirrors test_mlp_loss_masks_policy_by_train_policy):
+    # the policy CE averages over train_policy=1 positions only (so it equals
+    # the loss computed on that subset alone), while value loss spans all.
+    net = _aznet()
+    samples, target, mask = _pcr_batch(6, seed=2)
+    value = jnp.zeros(6)
+    full = jnp.ones(6, jnp.float32)
+    half = jnp.array([1, 1, 1, 0, 0, 0], jnp.float32)
+    first3 = jax.tree.map(lambda x: x[:3], samples)
+
+    _, a_full = gnn_loss(net, samples, target, value, mask, full)
+    _, a_half = gnn_loss(net, samples, target, value, mask, half)
+    _, a_first3 = gnn_loss(
+        net, first3, target[:3], value[:3], mask[:3], jnp.ones(3, jnp.float32)
+    )
+    # value loss spans every position -> unchanged by the policy mask.
+    assert abs(float(a_full["value_loss"]) - float(a_half["value_loss"])) < 1e-5
+    # masked policy loss == the policy loss over the unmasked subset alone.
+    assert abs(float(a_half["policy_loss"]) - float(a_first3["policy_loss"])) < 1e-4
+
+
+def test_gnn_loss_all_zero_train_policy_is_finite() -> None:
+    # PCR can produce a batch with no full-search (train_policy=1) rows -- the
+    # `jnp.maximum(sum(train_policy), 1.0)` guard (gnn_backend.py) must keep the
+    # policy loss at a defined 0, not divide 0/0 into NaN.
+    net = _aznet()
+    samples, target, mask = _pcr_batch(4, seed=3)
+    loss, aux = gnn_loss(
+        net, samples, target, jnp.zeros(4), mask, jnp.zeros(4, jnp.float32)
+    )
+    assert bool(jnp.isfinite(loss))
+    assert float(aux["policy_loss"]) == 0.0

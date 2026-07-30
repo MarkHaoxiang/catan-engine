@@ -156,7 +156,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         width=cfg.net.width, layers=cfg.net.layers, head_depth=cfg.net.depth
     )
     backend = GNNBackend(
-        netcfg, setup_depth=cfg.net.setup_depth,
+        netcfg, value_weight=cfg.net.value_weight, setup_depth=cfg.net.setup_depth,
         setup_temperature=cfg.net.setup_temperature, setup_beam=cfg.net.setup_beam,
         chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
     )  # fmt: skip

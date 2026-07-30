@@ -139,20 +139,22 @@ def gnn_loss(
     value: Array,
     mask: Array,
     train_policy: Array,
+    value_weight: float = 1.0,
 ) -> tuple[Float[Array, ""], Metrics]:
     """Masked policy cross-entropy (against the search target, over *legal*
-    actions) + value logistic loss. The softmax is masked to the legal set so the
-    net never spends capacity on per-position illegality (the search masks at play
-    time). The policy CE is averaged over ``train_policy`` = 1 positions only
-    (value-only playout-cap positions don't train the policy); value trains on
-    all. With ``train_policy`` all 1 this is the plain mean."""
+    actions) + ``value_weight`` x the value logistic loss. The softmax is masked
+    to the legal set so the net never spends capacity on per-position illegality
+    (the search masks at play time). The policy CE is averaged over
+    ``train_policy`` = 1 positions only (value-only playout-cap positions don't
+    train the policy); value trains on all. With ``train_policy`` all 1 this is
+    the plain mean."""
     vs, logits = jax.vmap(model)(sample)
     logp = _masked_logp(logits, mask)
     # guard 0 * -inf on illegal slots (target is 0 there anyway).
     ce = -jnp.sum(jnp.where(mask > 0, policy * logp, 0.0), axis=-1)  # per position
     policy_loss = jnp.sum(train_policy * ce) / jnp.maximum(jnp.sum(train_policy), 1.0)
     value_loss = jnp.mean(jax.nn.softplus(vs) - value * vs)
-    return policy_loss + value_loss, {
+    return policy_loss + value_weight * value_loss, {
         "policy_loss": policy_loss,
         "value_loss": value_loss,
     }
@@ -173,6 +175,7 @@ class GNNBackend:
         self,
         cfg: GraphNetConfig,
         *,
+        value_weight: float = 1.0,
         setup_depth: int = 1,
         setup_temperature: float = 2.0,
         setup_beam: int = 4,
@@ -181,6 +184,7 @@ class GNNBackend:
         ordered: bool = False,
     ) -> None:
         self.cfg = cfg
+        self.value_weight = value_weight
         self.setup_depth = setup_depth
         self.setup_temperature = setup_temperature
         self.setup_beam = setup_beam
@@ -252,12 +256,14 @@ class GNNBackend:
         return optimizer.init(eqx.filter(net, eqx.is_inexact_array))
 
     def make_step(self, optimizer: optax.GradientTransformation) -> StepFn:
+        value_weight = self.value_weight
+
         @eqx.filter_jit
         def step(
             net: BoardGNN, opt_state: optax.OptState, item: GNNItem
         ) -> tuple[BoardGNN, optax.OptState, Metrics]:
             (loss, aux), grads = eqx.filter_value_and_grad(_loss_item, has_aux=True)(
-                net, item
+                net, item, value_weight
             )
             updates, opt_state = optimizer.update(
                 grads, opt_state, eqx.filter(net, eqx.is_inexact_array)
@@ -274,10 +280,13 @@ class GNNBackend:
         return _eval(net, item)
 
 
-def _loss_item(net: BoardGNN, item: GNNItem) -> tuple[Float[Array, ""], Metrics]:
+def _loss_item(
+    net: BoardGNN, item: GNNItem, value_weight: float
+) -> tuple[Float[Array, ""], Metrics]:
     return gnn_loss(
-        net, _sample_of(item), item.policy, item.value, item.mask, item.train_policy
-    )
+        net, _sample_of(item), item.policy, item.value, item.mask,
+        item.train_policy, value_weight,
+    )  # fmt: skip
 
 
 @eqx.filter_jit

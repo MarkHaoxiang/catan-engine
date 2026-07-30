@@ -140,7 +140,10 @@ def _tile_features(
 ) -> Float[Array, f"t={N_TILES} tile_f"]:
     """Per-hex node features (relative to ``p``): resource, pips, robber, and the
     own/other building weight summed over the hex's corners (settlement 1, city 2)."""
-    res_oh = jax.nn.one_hot(layout.tile_resource.astype(jnp.int32) % N_RESOURCES, 5)
+    tres = layout.tile_resource.astype(jnp.int32)
+    # DESERT (== N_RESOURCES) has no resource -- zero its one-hot row rather
+    # than let `% N_RESOURCES` alias it onto SHEEP's.
+    res_oh = jax.nn.one_hot(tres % N_RESOURCES, 5) * (tres < N_RESOURCES)[:, None]
     pips = (tile_pips(layout.tile_number) / 5.0)[:, None]  # (T, 1)
     robber = (jnp.arange(N_TILES) == state.robber).astype(jnp.float32)[:, None]
     owner = state.vertex_owner.astype(jnp.int32)
