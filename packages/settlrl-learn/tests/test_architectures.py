@@ -27,7 +27,10 @@ from _symmetry import (
 )
 from settlrl_engine.board import Board
 from settlrl_engine.board.dev_cards import DevCard
+from settlrl_engine.board.layout import N_TILES, N_VERTICES, BoardLayout
+from settlrl_engine.board.resources import N_RESOURCES
 from settlrl_engine.board.state import BoardState
+from settlrl_engine.board.tile import Tile
 from settlrl_engine.env import N_FLAT, ActionType, BatchedSettlrlEnv
 from settlrl_learn.features import features
 from settlrl_learn.nn import graph, graphnet
@@ -135,35 +138,40 @@ def test_board_symmetry_leaves_structured_models_invariant() -> None:
 
 
 @pytest.mark.parametrize(
-    ("preset", "version"),
+    ("preset", "version", "incidence"),
     [
-        ("gn_multi", 1),
-        ("gn_graphnorm", 1),
-        ("gn_gat", 1),
-        ("gn_full", 1),
-        ("gn_hetero", 1),
-        ("gn_global", 2),
-        ("gn_hetero", 2),
+        ("gn_multi", 1, False),
+        ("gn_graphnorm", 1, False),
+        ("gn_gat", 1, False),
+        ("gn_full", 1, False),
+        ("gn_hetero", 1, False),
+        ("gn_global", 2, False),
+        ("gn_hetero", 2, False),
+        ("gn_global", 2, True),
+        ("gn_hetero", 2, True),
     ],
 )
-def test_graphnet_presets_are_invariant(preset: str, version: int) -> None:
+def test_graphnet_presets_are_invariant(
+    preset: str, version: int, incidence: bool
+) -> None:
     # The configurable GraphNet keeps both invariances across every lever
     # (attention, GraphNorm spanning the node axis, the global node, JK) -- it
     # uses only symmetric aggregations and relative features, no absolute PE.
     layout, state = _position(version)
     cfg = PRESETS[preset]._replace(
-        width=8, layers=2, head_depth=1, feature_version=version
+        width=8, layers=2, head_depth=1, feature_version=version, incidence=incidence
     )
     model = GraphNet(jax.random.key(0), out_dim=_OUT, cfg=cfg)
-    base = np.asarray(model(board_sample(layout, state, jnp.int32(0), version=version)))
+
+    def sample(lo: BoardLayout, st: BoardState, q: int) -> Sample:
+        return board_sample(lo, st, jnp.int32(q), version=version, incidence=incidence)
+
+    base = np.asarray(model(sample(layout, state, 0)))
     for sym in board_symmetries():
         l2, s2 = apply_symmetry(layout, state, sym)
-        rot = np.asarray(model(board_sample(l2, s2, jnp.int32(0), version=version)))
-        assert np.allclose(base, rot, atol=1e-3)
+        assert np.allclose(base, np.asarray(model(sample(l2, s2, 0))), atol=1e-3)
     perm = np.array([1, 2, 3, 0])
-    relabeled = board_sample(
-        layout, relabel_players(state, perm), jnp.int32(perm[0]), version=version
-    )
+    relabeled = sample(layout, relabel_players(state, perm), int(perm[0]))
     assert np.allclose(base, np.asarray(model(relabeled)), atol=1e-3)
 
 
@@ -295,47 +303,67 @@ def test_flat_mlp_is_not_symmetry_invariant() -> None:
     assert moved > 1e-3
 
 
-def _aznet(preset: str = "gn_global", version: int = 1, net_seed: int = 0) -> BoardGNN:
+def _aznet(
+    preset: str = "gn_global",
+    version: int = 1,
+    net_seed: int = 0,
+    incidence: bool = False,
+) -> BoardGNN:
     cfg = PRESETS[preset]._replace(
-        width=16, layers=2, head_depth=1, feature_version=version
+        width=16,
+        layers=2,
+        head_depth=1,
+        feature_version=version,
+        incidence=incidence,
     )
     return BoardGNN(jax.random.key(net_seed), cfg)
 
 
-@pytest.mark.parametrize("version", [1, 2])
+_FEATURE_ARMS = [(1, False), (2, False), (2, True)]
+"""The featurization arms every net-level symmetry contract is checked over:
+v1, v2, v2 + the incidence block."""
+
+
+@pytest.mark.parametrize(("version", "incidence"), _FEATURE_ARMS)
 @pytest.mark.parametrize("preset", ["gn_global", "gn_hetero"])
 def test_aznet_value_invariant_policy_equivariant_under_board_symmetry(
-    preset: str, version: int
+    preset: str, version: int, incidence: bool
 ) -> None:
     # The factored value+policy net: the value is invariant under a board
     # symmetry, and the policy is *equivariant* -- a settlement-at-v action maps
     # to settlement-at-(sigma v), road-at-e to road-at-(sigma e), robber-tile-t
     # to sigma(t) -- so policy(sigma . board)[action_permutation] == policy(board).
     layout, state = _position(version)
-    net = _aznet(preset, version)
+    net = _aznet(preset, version, incidence=incidence)
     p = jnp.int32(0)
-    vv, pp = net(board_sample(layout, state, p, version=version))
+    vv, pp = net(board_sample(layout, state, p, version=version, incidence=incidence))
     v0, pol0 = np.asarray(vv), np.asarray(pp)
     for sym in board_symmetries():
         l2, s2 = apply_symmetry(layout, state, sym)
-        v, pol = net(board_sample(l2, s2, p, version=version))
+        v, pol = net(board_sample(l2, s2, p, version=version, incidence=incidence))
         assert np.allclose(np.asarray(v), v0, atol=1e-3)  # value invariant
         perm = action_permutation(sym)
         assert np.allclose(np.asarray(pol)[perm], pol0, atol=1e-3)  # policy equivariant
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize(("version", "incidence"), _FEATURE_ARMS)
 @pytest.mark.parametrize("preset", ["gn_global", "gn_hetero"])
 def test_aznet_value_and_policy_invariant_under_player_relabel(
-    preset: str, version: int
+    preset: str, version: int, incidence: bool
 ) -> None:
     layout, state = _position(version)
-    net = _aznet(preset, version)
-    vv, pp = net(board_sample(layout, state, jnp.int32(0), version=version))
+    net = _aznet(preset, version, incidence=incidence)
+    vv, pp = net(
+        board_sample(layout, state, jnp.int32(0), version=version, incidence=incidence)
+    )
     v0, pol0 = np.asarray(vv), np.asarray(pp)
     perm = np.array([1, 2, 3, 0])
     relabeled = board_sample(
-        layout, relabel_players(state, perm), jnp.int32(perm[0]), version=version
+        layout,
+        relabel_players(state, perm),
+        jnp.int32(perm[0]),
+        version=version,
+        incidence=incidence,
     )
     v, pol = net(relabeled)
     assert np.allclose(np.asarray(v), v0, atol=1e-3)  # value invariant
@@ -485,7 +513,7 @@ def test_v1_features_match_the_frozen_golden(n_players: int) -> None:
 
 
 def test_feature_version_dims() -> None:
-    v1, v2 = graph.dims(1), graph.dims(2)
+    v1, v2 = graph.dims(1, False), graph.dims(2, False)
     assert v1 == (graph.NODE_DIM, graph.EDGE_DIM, graph.GLOBAL_DIM, graph.TILE_DIM)
     # v2 only widens the globals (own hand 5 + dev hand 5 + free roads, own and
     # opponent longest-road length, pending discard); node/edge/tile keep theirs.
@@ -612,3 +640,154 @@ def test_v2_block_pins_its_layout_and_scaling() -> None:
     for p, want in expected.items():
         block = np.asarray(board_sample(layout, state, jnp.int32(p), version=2).glob)
         np.testing.assert_allclose(block[-_V2_BLOCK:], want, atol=1e-6)
+
+
+# --------------------------------------------------------------------------- #
+# The incidence block (v2 option): per-tile identity without hex nodes          #
+# --------------------------------------------------------------------------- #
+
+
+def _incidence(nodes: np.ndarray) -> np.ndarray:
+    """The incidence tail of a node-feature matrix, as (V, slots, per-hex)."""
+    tail = nodes[:, -graph.INCIDENCE_DIM :]
+    return tail.reshape(N_VERTICES, graph.MAX_VERTEX_TILES, graph.INCIDENT_TILE_DIM)
+
+
+def test_incidence_reveals_number_identity() -> None:
+    # The headline: `tile_pips` (6 - |7 - n|) collapses 6 with 8, and nothing else
+    # in v1/v2 carries the number -- so swapping a 6-tile's number with an 8-tile's
+    # produces a *different board* (different same-number income correlation, a real
+    # strategic difference) that featurizes byte-identically, `tiles` block included.
+    # The incidence block's number one-hot is the fix.
+    layout, state = _mid_game(2)
+    nums = np.asarray(layout.tile_number)
+    six, eight = int(np.flatnonzero(nums == 6)[0]), int(np.flatnonzero(nums == 8)[0])
+    swapped = np.asarray(layout.tile_number).copy()
+    swapped[six], swapped[eight] = swapped[eight], swapped[six]
+    pair = (layout, layout._replace(tile_number=jnp.asarray(swapped)))
+    p = jnp.int32(0)
+
+    for version in (1, 2):
+        a, b = (board_sample(lo, state, p, version=version) for lo in pair)
+        assert np.array_equal(_flat(a), _flat(b))  # the proven collapse
+    a, b = (
+        board_sample(lo, state, p, version=2, incidence=True) for lo in pair
+    )  # ... now resolved
+    assert not np.array_equal(np.asarray(a.nodes), np.asarray(b.nodes))
+    # and it is the number one-hot that separates them: the other per-hex terms
+    # (resource, pips, robber) are untouched by a number swap between equal-pip
+    # hexes, slot order included -- reordering a vertex's slots would take an
+    # incident hex of the same resource numbered strictly between 6 and 8.
+    inc_a, inc_b = _incidence(np.asarray(a.nodes)), _incidence(np.asarray(b.nodes))
+    n_oh = graph.INCIDENT_TILE_DIM - graph.N_TILE_NUMBERS
+    assert np.array_equal(inc_a[..., :n_oh], inc_b[..., :n_oh])
+    assert not np.array_equal(inc_a[..., n_oh:], inc_b[..., n_oh:])
+
+
+def test_incidence_sort_key_is_injective_on_the_hex_payload() -> None:
+    # The load-bearing invariant behind equivariance: slots are ordered by a key
+    # computed from the hex's own (resource, number, robber) -- never its index --
+    # so two hexes tie only when their whole feature row is identical, making the
+    # sorted sequence a function of the *multiset* alone. Injectivity is what turns
+    # "ties are harmless" into a proof rather than a hope.
+    seen: dict[int, tuple[int, int, int]] = {}
+    for res in range(N_RESOURCES + 1):
+        for num in (0, *range(2, 13)):
+            for robber in (0, 1):
+                k = int(
+                    graph._tile_sort_key(*(jnp.int32(x) for x in (res, num, robber)))
+                )
+                assert k not in seen, (seen.get(k), (res, num, robber))
+                assert k < graph._ABSENT_TILE_KEY  # pads must sort strictly last
+                seen[k] = (res, num, robber)
+
+
+def _incidence_stress(layout: BoardLayout, state: BoardState) -> Board:
+    """A board that engages every incidence hazard at one interior vertex: its
+    three hexes are the desert plus a genuine payload *tie* (two hexes with the
+    same resource and number), with the robber on a fourth hex."""
+    slots = np.asarray(graph.VERTEX_TILES)
+    deg = np.asarray(graph.VERTEX_TILE_PRESENT).sum(1)
+    v = int(np.flatnonzero(deg == graph.MAX_VERTEX_TILES)[0])
+    t0, t1, t2 = (int(t) for t in slots[v])
+    res, num = (
+        np.asarray(a).copy() for a in (layout.tile_resource, layout.tile_number)
+    )
+    res[t0], num[t0] = int(Tile.DESERT), 0
+    res[t1] = res[t2] = int(Tile.WOOD)
+    num[t1] = num[t2] = 6
+    elsewhere = next(t for t in range(N_TILES) if t not in (t0, t1, t2))
+    return layout._replace(
+        tile_resource=jnp.asarray(res), tile_number=jnp.asarray(num)
+    ), state._replace(robber=jnp.asarray(elsewhere, state.robber.dtype))
+
+
+def test_incidence_features_are_symmetry_equivariant() -> None:
+    # The gate. A *fixed* per-vertex hex order (canonical hex index) is NOT
+    # D3-equivariant: for symmetry #1, vertex 0's hexes [0, 3, 4] map to
+    # [16, 12, 13], while vertex 40 = sigma(0) lists its own as [12, 13, 16] --
+    # slot k of v and slot k of sigma(v) hold different hexes. Sorting each
+    # vertex's slots by the hexes' own attributes instead is equivariant: a
+    # symmetry carries each hex's attributes with it, so the *multiset* of
+    # incident payloads at sigma(v) equals the one at v, and sorting a multiset
+    # is well defined. Checked on the hostile board (desert, duplicate hexes,
+    # robber) -- ties and pads are exactly where a slot-order bug would hide.
+    layout, state = _incidence_stress(*_mid_game(4))
+    p = jnp.int32(0)
+    base = np.asarray(board_sample(layout, state, p, version=2, incidence=True).nodes)
+    slots = np.asarray(graph.VERTEX_TILES)
+    deg = np.asarray(graph.VERTEX_TILE_PRESENT).sum(1)
+    v = int(np.flatnonzero(deg == graph.MAX_VERTEX_TILES)[0])
+    rows = _incidence(base)[v]
+    # vacuity: the tie and the desert really are in this vertex's slots.
+    assert (
+        sum(np.array_equal(rows[i], rows[j]) for i, j in ((0, 1), (0, 2), (1, 2))) == 1
+    )
+    assert rows[:, N_RESOURCES].sum() == 1.0  # exactly one desert slot
+    for sym in board_symmetries():
+        l2, s2 = apply_symmetry(layout, state, sym)
+        rot = np.asarray(board_sample(l2, s2, p, version=2, incidence=True).nodes)
+        # per-vertex equivariance, the statement the net-level invariance rests on
+        np.testing.assert_allclose(rot[sym.vertices], base, atol=1e-6)
+    assert slots.shape == (N_VERTICES, graph.MAX_VERTEX_TILES)
+
+
+def test_incidence_pads_low_degree_vertices_with_no_hex() -> None:
+    # Coast vertices touch 1 or 2 hexes. The pad is an all-zero slot placed last
+    # (absent hexes sort after every real key), and it is unambiguous *because*
+    # the resource one-hot is 6 wide with the desert as its own column: every real
+    # hex sets exactly one of those columns, so no presence flag is needed.
+    layout, state = _mid_game(2)
+    inc = _incidence(
+        np.asarray(
+            board_sample(layout, state, jnp.int32(0), version=2, incidence=True).nodes
+        )
+    )
+    deg = np.asarray(graph.VERTEX_TILE_PRESENT).sum(1).astype(int)
+    assert sorted(set(deg.tolist())) == [1, 2, 3]  # coast / edge / interior
+    for v in range(N_VERTICES):
+        assert not inc[v, deg[v] :].any()  # pads last, exactly zero
+        real = inc[v, : deg[v]]
+        assert np.array_equal(real[:, : N_RESOURCES + 1].sum(1), np.ones(deg[v]))
+
+
+def test_incidence_dims_and_v2_block_untouched() -> None:
+    v2, v2i = graph.dims(2, False), graph.dims(2, True)
+    assert graph.INCIDENCE_DIM == graph.MAX_VERTEX_TILES * graph.INCIDENT_TILE_DIM == 57
+    assert v2i[0] - v2[0] == graph.INCIDENCE_DIM
+    assert (v2i[1], v2i[2], v2i[3]) == (v2[1], v2[2], v2[3])  # nodes only
+    # The block is *appended*, so the v2 node columns (and every other array) keep
+    # their bytes -- a v2 golden's scope is unaffected by turning incidence on.
+    layout, state = _mid_game(2)
+    p = jnp.int32(0)
+    plain = board_sample(layout, state, p, version=2)
+    with_inc = board_sample(layout, state, p, version=2, incidence=True)
+    assert np.array_equal(
+        np.asarray(with_inc.nodes)[:, : v2[0]], np.asarray(plain.nodes)
+    )
+    for name in ("edges", "glob", "tiles"):
+        assert np.array_equal(
+            np.asarray(getattr(plain, name)), np.asarray(getattr(with_inc, name))
+        )
+    with pytest.raises(ValueError, match="incidence"):
+        board_sample(layout, state, p, version=1, incidence=True)

@@ -60,6 +60,7 @@ class NetConfig(_Sub):
     layers: int = 3  # GNN message-passing layers (ignored by mlp)
     preset: str = "gn_global"  # settlrl_learn.nn.graphnet.PRESETS key
     feature_version: int = 1  # board featurization (settlrl_learn.nn.graph)
+    incidence: bool = False  # v2 option: per-vertex incident-hex features
     value_weight: float = 1.0  # mlp value-loss weight
     # the setup phase is played by a fixed policy (GNN path). setup_depth<=1 =
     # lookahead opener; >=2 = probabilistic-expectimax (>=3p / better value).
@@ -158,6 +159,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
         layers=cfg.net.layers,
         head_depth=cfg.net.depth,
         feature_version=cfg.net.feature_version,
+        incidence=cfg.net.incidence,
     )
     backend = GNNBackend(
         netcfg, value_weight=cfg.net.value_weight, setup_depth=cfg.net.setup_depth,

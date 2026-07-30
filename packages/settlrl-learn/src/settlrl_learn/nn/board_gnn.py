@@ -102,12 +102,18 @@ class _GNNPrior:
     model: BoardGNN
     het: bool
     version: int = 1
+    incidence: bool = False
 
     def _sample(
         self, layout: BoardLayout, state: BoardState, player: IntScalar
     ) -> Sample:
         return board_sample(
-            layout, state, player, with_tiles=self.het, version=self.version
+            layout,
+            state,
+            player,
+            with_tiles=self.het,
+            version=self.version,
+            incidence=self.incidence,
         )
 
     def __call__(
@@ -125,13 +131,21 @@ def gnn_seams(model: BoardGNN) -> tuple[ValueFunction, ValuePrior]:
     """Adapt the GNN onto the search seams as ``(value, prior)``; both run the
     board-graph forward. Build the search with ``value_scale=2``. Tiles are
     featurized only for a heterogeneous net (else the trunk ignores them, so we
-    keep them out of the graph); the featurization version is the net's own."""
+    keep them out of the graph); the featurization is the net's own."""
     het = model.trunk.tile_enc is not None
-    version = model.trunk.cfg.feature_version
+    cfg = model.trunk.cfg
+    version, incidence = cfg.feature_version, cfg.incidence
 
     def value(layout: BoardLayout, state: BoardState, player: IntScalar) -> Value:
         return model(
-            board_sample(layout, state, player, with_tiles=het, version=version)
+            board_sample(
+                layout,
+                state,
+                player,
+                with_tiles=het,
+                version=version,
+                incidence=incidence,
+            )
         )[0]
 
-    return value, _GNNPrior(model, het, version)
+    return value, _GNNPrior(model, het, version, incidence)

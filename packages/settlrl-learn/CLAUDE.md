@@ -75,11 +75,42 @@ uses them.
     (`awards._reassign_award`), which zeroes the stored length, so both slots read
     0 even when the tied trails are 7 roads long.
     GPU pricing of the featurizer DFS is on the Task 5 checklist.
-    **Gotcha:** `tile_number` reaches the net only via `tile_pips` (`6 − |7 − n|`),
-    a many-to-one collapse (6≡8, 5≡9, 4≡10, 3≡11, 2≡12) — number identity and
-    same-number income correlation (e.g. two 6s vs. a 6 and an 8) are
-    unrepresentable in either version's features so far; the fix vehicle is the
-    v2 incidence arm (`docs/superpowers/plans/2026-07-30-featurization-v2.md`).
+    **Incidence** (`board_sample(incidence=True)`, `GraphNetConfig.incidence`; a
+    v2 *option*, not a version — the study's `v2_incidence` arm) appends to each
+    vertex's node features its ≤3 incident hexes **un-summed**: resource one-hot
+    (6 wide, the desert its own column), pips/5, robber flag, number one-hot
+    (11, for numbers 2–12). +57 node columns (3 slots × 19), nothing else moved
+    — the block is *appended*, so the v2 prefix and every other array keep their
+    bytes, and no architecture changes (the node encoder just gets wider). It is
+    the fix for the collapse that `tile_pips` (`6 − |7 − n|`) imposes on every
+    other featurization (6≡8, 5≡9, 4≡10, 3≡11, 2≡12): number identity and
+    same-number income correlation were unrepresentable, demonstrated by
+    swapping a 6-tile's number with an 8-tile's — a materially different board
+    that featurizes **byte-identically** under v1 and v2 (`tiles` block
+    included), and differs only in the incidence number one-hot with it on.
+    **Slot order is by the hexes' own attributes, not by hex index, and that is
+    forced by equivariance.** A fixed canonical-hex-index order is *not*
+    D3-equivariant: for symmetry #1 vertex 0's hexes `[0, 3, 4]` map to
+    `[16, 12, 13]`, while σ(0) = 40 lists its own in index order as
+    `[12, 13, 16]` — slot *k* of *v* and of σ(*v*) hold different hexes (128 of
+    324 vertex-symmetry pairs mismatch). What a symmetry *does* preserve is the
+    **multiset** of incident-hex attributes (it carries resource / number /
+    robber along with the hex, permuting only positions), so sorting each
+    vertex's slots by `_tile_sort_key` — injective on `(resource, number,
+    robber)` and a function of those attributes alone — makes the slot sequence
+    a function of the multiset, hence equivariant. Ties are the subtlety and are
+    harmless *because the key is the whole payload*: two slots tie only when
+    their feature rows are identical, so which one lands first cannot change the
+    output. Sorting by pips (the plan's first candidate) would *not* do — it
+    ties 234 slots per 20 boards between hexes with different payloads, where
+    order would then fall back to index; the full-payload key ties 14, all of
+    them genuinely interchangeable. The tradeoff bought: no geometric slot
+    identity — the net cannot tell which incident hex sits in which direction
+    (unrecoverable in any equivariant featurization, since there is no canonical
+    frame), and the "slot" index it reads is a lexicographic rank. Coast
+    vertices (1 or 2 hexes) pad with an **all-zero slot placed last**; no
+    presence flag, because a real hex always sets exactly one resource column
+    (desert included), so all-zero is unambiguously "no hex".
   - `nn/architectures.py` — the equinox architectures over it (`mlp_engineered`
     / `mlp_flat` / `deepset` / `gnn`, via `make_model`); experiment 0003
     composes them. `deepset`/`gnn` are invariant under the board's symmetry

@@ -23,7 +23,8 @@ be compared on a level field:
 The featurization is **versioned**: ``board_sample(..., version=...)`` selects a
 frozen feature set (see ``FEATURE_VERSIONS``), so an existing net/checkpoint keeps
 reading exactly the bytes it was trained on while a new one opts into a wider set.
-``dims(version)`` resolves the widths per version; the module-level ``*_DIM``
+``incidence`` is a version-2 *option* on top of it (an ablation arm, not a version).
+``dims(version, incidence)`` resolves the widths; the module-level ``*_DIM``
 constants are version 1's.
 
 A training-side module (equinox/jraph consumers build on it): not imported by
@@ -39,7 +40,7 @@ from typing import NamedTuple
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Int
 from settlrl_agents.internal.feature_engineering import tile_pips
 from settlrl_engine.board.layout import (
     EDGE_V,
@@ -92,6 +93,23 @@ _tilev = np.asarray(TILE_V)  # (T, corners)
 VT_V = jnp.asarray(_tilev.reshape(-1))
 VT_T = jnp.asarray(np.repeat(np.arange(N_TILES), _tilev.shape[1]))
 
+# vertex -> its incident hexes as a static gather index + presence mask: 1 hex at
+# a coast corner, 2 at a coast edge, 3 inland (so the pad below is real). The slot
+# order here is arbitrary -- ``_incidence_features`` re-sorts each vertex's slots
+# by the hexes' own attributes (see ``_tile_sort_key``).
+_adj: list[list[int]] = [[] for _ in range(N_VERTICES)]
+for _t, _vs in enumerate(np.asarray(TILE_V)):
+    for _v in np.asarray(_vs):
+        _adj[int(_v)].append(_t)
+MAX_VERTEX_TILES = max(len(a) for a in _adj)
+_vt_idx = np.zeros((N_VERTICES, MAX_VERTEX_TILES), dtype=np.int32)
+_vt_present = np.zeros((N_VERTICES, MAX_VERTEX_TILES), dtype=np.float32)
+for _v, _ts in enumerate(_adj):
+    _vt_idx[_v, : len(_ts)] = _ts
+    _vt_present[_v, : len(_ts)] = 1.0
+VERTEX_TILES = jnp.asarray(_vt_idx)
+VERTEX_TILE_PRESENT = jnp.asarray(_vt_present)
+
 # vertex-port incidence (V, P): vertex v sits on port p.
 _pinc = np.zeros((N_VERTICES, PORT_V.shape[0]), dtype=np.float32)
 for _p, _vs in enumerate(np.asarray(PORT_V)):
@@ -118,8 +136,63 @@ hex's frequency in [0, 1]. Both the per-hex and (from version 2) the per-vertex
 production terms use it, so the two readouts of the same quantity share a scale."""
 
 
+N_TILE_NUMBERS = 11
+"""Dice numbers 2..12 as one-hot columns; the desert (stored number 0) is the
+all-zero row there, already distinguished by its own resource column."""
+
+INCIDENT_TILE_DIM = (N_RESOURCES + 1) + 1 + 1 + N_TILE_NUMBERS
+"""One incident hex: resource one-hot (the desert its own column, so a real hex
+always sets exactly one -- which is what makes the all-zero pad unambiguous),
+pips/5, robber flag, number one-hot."""
+
+INCIDENCE_DIM = MAX_VERTEX_TILES * INCIDENT_TILE_DIM
+
+_ABSENT_TILE_KEY = 1 << 15
+"""Sort key of a missing hex: above every real key, so the pads occupy a vertex's
+trailing slots. A symmetry preserves each vertex's hex count, so it preserves how
+many those are."""
+
+
+def _tile_sort_key(
+    resource: Int[Array, "*t"], number: Int[Array, "*t"], robber: Int[Array, "*t"]
+) -> Int[Array, "*t"]:
+    """A total order on the incident-hex payload, injective on it and a function of
+    the hex's own attributes only -- never its index."""
+    number_stride = N_TILE_NUMBERS + 2  # the stored number's range: 0, then 2..12
+    return (resource * number_stride + number) * 2 + robber
+
+
+def _incidence_features(
+    layout: BoardLayout, state: BoardState
+) -> Float[Array, f"v={N_VERTICES} inc={INCIDENCE_DIM}"]:
+    """Each vertex's <=3 incident hexes, un-summed and concatenated: per-tile (and
+    per-*number*) identity without hex nodes. Slots are ordered by
+    ``_tile_sort_key``, absent hexes zero-padded last."""
+    resource = layout.tile_resource.astype(jnp.int32)
+    number = layout.tile_number.astype(jnp.int32)
+    robber = (jnp.arange(N_TILES) == state.robber).astype(jnp.int32)
+    per_tile = jnp.concatenate(
+        [
+            jax.nn.one_hot(resource, N_RESOURCES + 1),
+            (tile_pips(layout.tile_number) / _PIPS_SCALE)[:, None],
+            robber.astype(jnp.float32)[:, None],
+            jax.nn.one_hot(number - 2, N_TILE_NUMBERS),  # the desert's 0 -> all zero
+        ],
+        axis=1,
+    )  # (T, INCIDENT_TILE_DIM)
+    key = jnp.where(
+        VERTEX_TILE_PRESENT > 0,
+        _tile_sort_key(resource, number, robber)[VERTEX_TILES],
+        _ABSENT_TILE_KEY,
+    )
+    order = jnp.argsort(key, axis=1)
+    slots = jnp.take_along_axis(VERTEX_TILES, order, axis=1)
+    present = jnp.take_along_axis(VERTEX_TILE_PRESENT, order, axis=1)
+    return (per_tile[slots] * present[..., None]).reshape(N_VERTICES, INCIDENCE_DIM)
+
+
 def _node_features(
-    layout: BoardLayout, state: BoardState, p: IntScalar, version: int
+    layout: BoardLayout, state: BoardState, p: IntScalar, version: int, incidence: bool
 ) -> Float[Array, f"v={N_VERTICES} node_f"]:
     owner = state.vertex_owner.astype(jnp.int32)
     mine = owner == p + 1
@@ -143,9 +216,10 @@ def _node_features(
     v_2to1 = jnp.clip(VERTEX_PORT @ port_res_oh, 0.0, 1.0)  # (V, 5)
     v_3to1 = jnp.clip(VERTEX_PORT @ (alloc == 5).astype(jnp.float32), 0.0, 1.0)[:, None]
 
-    return jnp.concatenate(
-        [owner_oh, building, node_prod, robber_adj, v_2to1, v_3to1], axis=1
-    )
+    parts = [owner_oh, building, node_prod, robber_adj, v_2to1, v_3to1]
+    if incidence:
+        parts.append(_incidence_features(layout, state))  # appended: prefix unchanged
+    return jnp.concatenate(parts, axis=1)
 
 
 def _edge_features(
@@ -288,6 +362,7 @@ def board_sample(
     *,
     with_tiles: bool = True,
     version: int = 1,
+    incidence: bool = False,
 ) -> Sample:
     """Featurize one position from ``p``'s perspective into a :class:`Sample`.
     ``features`` (when given) computes the optional ``extra`` vector; by default
@@ -295,11 +370,17 @@ def board_sample(
     features (a constant-zero ``tiles``) -- the non-heterogeneous trunk ignores
     them, so this keeps its graph free of tile ops (byte-identical to the
     pre-hetero forward). ``version`` selects the feature set (``FEATURE_VERSIONS``);
-    a net must be built for the same version (``dims``)."""
+    ``incidence`` (a version-2 option) appends each vertex's incident-hex block to
+    ``nodes``. A net must be built for the same ``(version, incidence)``
+    (``dims``)."""
     if version not in FEATURE_VERSIONS:
         raise ValueError(f"unknown feature version {version} (have {FEATURE_VERSIONS})")
+    if incidence and version < 2:
+        raise ValueError(
+            f"incidence features need feature version >= 2 (got {version})"
+        )
     return Sample(
-        nodes=_node_features(layout, state, p, version),
+        nodes=_node_features(layout, state, p, version, incidence),
         edges=_edge_features(state, p),
         glob=_global_features(layout, state, p, version),
         tiles=(
@@ -312,16 +393,19 @@ def board_sample(
 
 
 @cache
-def dims(version: int) -> tuple[int, int, int, int]:
+def dims(version: int, incidence: bool) -> tuple[int, int, int, int]:
     """``(node, edge, global, tile)`` feature widths at ``version`` (the topology
     dims ``N_VERTICES`` / ``N_DIR_EDGES`` / ``N_TILES`` are fixed). Required
-    argument: a default would cache the same version under two keys."""
+    arguments: a default would cache the same feature set under two keys."""
     from settlrl_engine.board import make_board
 
     layout, state = make_board(batch_size=1, n_players=2)
     one = jax.tree.map(lambda x: x[0], (layout, state))
     s = jax.eval_shape(
-        lambda lo, st: board_sample(lo, st, jnp.int32(0), version=version), *one
+        lambda lo, st: board_sample(
+            lo, st, jnp.int32(0), version=version, incidence=incidence
+        ),
+        *one,
     )
     return (
         int(s.nodes.shape[1]),
@@ -331,5 +415,5 @@ def dims(version: int) -> tuple[int, int, int, int]:
     )
 
 
-NODE_DIM, EDGE_DIM, GLOBAL_DIM, TILE_DIM = dims(1)
-"""Version-1 feature widths (``dims(version)`` for any other version)."""
+NODE_DIM, EDGE_DIM, GLOBAL_DIM, TILE_DIM = dims(1, False)
+"""Version-1 feature widths (``dims(...)`` for any other feature set)."""

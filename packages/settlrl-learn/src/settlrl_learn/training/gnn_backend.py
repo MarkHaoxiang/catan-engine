@@ -226,6 +226,7 @@ class GNNBackend:
             player,
             with_tiles=self.cfg.hetero,
             version=self.cfg.feature_version,
+            incidence=self.cfg.incidence,
         )
         return {"nodes": s.nodes, "edges": s.edges, "glob": s.glob, "tiles": s.tiles}
 
@@ -242,7 +243,9 @@ class GNNBackend:
         )
 
     def empty_item(self) -> GNNItem:
-        node_dim, edge_dim, global_dim, tile_dim = dims(self.cfg.feature_version)
+        node_dim, edge_dim, global_dim, tile_dim = dims(
+            self.cfg.feature_version, self.cfg.incidence
+        )
         return GNNItem(
             jnp.zeros((N_VERTICES, node_dim), jnp.float32),
             jnp.zeros((N_DIR_EDGES, edge_dim), jnp.float32),

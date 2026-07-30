@@ -33,7 +33,11 @@ Levers (``GraphNetConfig``):
   pass the same version). ``>=2`` also LayerNorms the pooled-readout ++
   global-node context (``ctx``, :meth:`GraphTrunk.ctx`) before the value/
   policy-context heads consume it -- v1 leaves ``g`` unnormalized and large
-  enough to dominate ``ctx`` by magnitude at init.
+  enough to dominate ``ctx`` by magnitude at init;
+- ``incidence`` -- a ``feature_version>=2`` option: widen the node features with
+  each vertex's incident-hex block (:func:`settlrl_learn.nn.graph.board_sample`'s
+  own flag, which every sample feeding this net must match). Wider encoder input,
+  no architecture change -- the structure-free alternative to ``hetero``.
 """
 
 from __future__ import annotations
@@ -64,6 +68,7 @@ class GraphNetConfig(NamedTuple):
     jk: bool = False
     hetero: bool = False  # add HEX/TILE nodes + vertex<->hex message passing
     feature_version: int = 1  # graph.FEATURE_VERSIONS: the board featurization
+    incidence: bool = False  # v2 option: per-vertex incident-hex features
 
 
 def _aggr(messages: Float[Array, "e w"]) -> Float[Array, "v w"]:
@@ -260,7 +265,9 @@ class GraphTrunk(eqx.Module):
     def __init__(self, key: KeyScalar, cfg: GraphNetConfig) -> None:
         from settlrl_learn.nn.graph import dims
 
-        NODE_DIM, EDGE_DIM, GLOBAL_DIM, TILE_DIM = dims(cfg.feature_version)
+        NODE_DIM, EDGE_DIM, GLOBAL_DIM, TILE_DIM = dims(
+            cfg.feature_version, cfg.incidence
+        )
         w = cfg.width
         # 3 encoder keys non-hetero (preserves the pre-hetero init exactly), +1
         # for the tile encoder when hetero; the rest seed the layers.

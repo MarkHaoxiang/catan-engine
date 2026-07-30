@@ -32,13 +32,14 @@ def load_anchor(name: str) -> tuple[Any, Any]:
     from settlrl_learn.training import GNNBackend
 
     meta = json.loads((ANCHOR_DIR / f"{name}.json").read_text())
-    # feature_version is pinned by the sidecar, not by the code's current default:
-    # an anchor's weights only fit the featurization it was trained on.
+    # the featurization is pinned by the sidecar, not by the code's current
+    # defaults: an anchor's weights only fit the one it was trained on.
     netcfg = PRESETS[meta["preset"]]._replace(
         width=meta["width"],
         layers=meta["layers"],
         head_depth=meta["head_depth"],
         feature_version=meta.get("feature_version", 1),
+        incidence=meta.get("incidence", False),
     )
     template = GNNBackend(netcfg).init(jax.random.key(0))
     net = eqx.tree_deserialise_leaves(ANCHOR_DIR / f"{name}.eqx", template)
