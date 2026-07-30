@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -165,6 +166,80 @@ def test_graphnet_presets_are_invariant(preset: str, version: int) -> None:
         layout, relabel_players(state, perm), jnp.int32(perm[0]), version=version
     )
     assert np.allclose(base, np.asarray(model(relabeled)), atol=1e-3)
+
+
+def test_v1_ctx_unbounded_v2_layernorm_bounds_it() -> None:
+    # Correctness-audit evidence, direct: on a real board, v1's raw ctx
+    # (pooled readout ++ the global node ``g``) sits at ~25x the L2 norm a
+    # random-init head is scaled for -- an artifact of sum-pooling over
+    # N=54 nodes, not learned signal (the audit's own measurement: block
+    # norms ~373/10/7 vs g~34, before this fix). ``feature_version>=2``'s
+    # LayerNorm provably (weight=1, bias=0 at init) bounds the WHOLE vector
+    # to unit per-element variance, so its norm sits at ``sqrt(dim)``
+    # regardless of net init; v1 clears many times that -- the control this
+    # test asserts must fail to stay bounded.
+    layout, state = _mid_game(4)
+    p = jnp.int32(0)
+    net1, net2 = _aznet("gn_global", 1), _aznet("gn_global", 2)
+    _h1, g1, readout1, _t1 = net1.trunk(board_sample(layout, state, p, version=1))
+    ctx1 = jnp.concatenate([readout1, g1])
+    _h2, g2, readout2, _t2 = net2.trunk(board_sample(layout, state, p, version=2))
+    ctx2 = net2.trunk.ctx(g2, readout2)
+    dim1, dim2 = ctx1.shape[0], ctx2.shape[0]
+    assert float(jnp.linalg.norm(ctx1)) > 5 * dim1**0.5  # v1: unbounded (the control)
+    assert float(jnp.linalg.norm(ctx2)) == pytest.approx(
+        dim2**0.5, rel=0.05
+    )  # v2: bounded
+
+
+def test_v2_ctx_norm_keeps_init_value_logit_calibrated() -> None:
+    # The plan's literal operationalization (std of value logits over ~32
+    # positions vs |mean|) does not discriminate at this width/depth: checked
+    # across 10 net-init seeds, v1's std/|mean| ratio is *not* reliably lower
+    # than v2's (sometimes higher) -- raw ctx magnitude dominates the head's
+    # random weights enough to inflate both the mean *and* the spread, not
+    # just the mean. The behavioral consequence that DOES discriminate,
+    # robustly, is calibration: the value logit is read as ``P(win)`` via
+    # ``tanh(logit/2)`` (``value_scale=2``, package CLAUDE.md), and v1's
+    # oversized ctx (previous test) pushes the untrained logit's magnitude far
+    # outside the unsaturated band regardless of the actual position, while
+    # v2's bounded ctx keeps it inside -- at the project's canonical test net
+    # seed (``_aznet``'s ``jax.random.key(0)``, not selected for this result).
+    positions = [_mid_game(2, steps=150, seed=s) for s in range(32)]
+    saturated_bar = 2.0  # |logit|/2 > 1 already compresses tanh toward +-1
+    for version, must_saturate in ((1, True), (2, False)):
+        net = _aznet("gn_global", version)
+        logits = np.asarray(
+            [
+                float(net(board_sample(lo, st, jnp.int32(0), version=version))[0])
+                for lo, st in positions
+            ]
+        )
+        assert (abs(float(logits.mean())) > saturated_bar) == must_saturate
+
+
+def test_v2_readout_std_finite_at_zero_variance() -> None:
+    # The std readout block (`graphnet._pool`) computes `sqrt(var + eps)`;
+    # without the eps guard, `sqrt`'s gradient is infinite at exact zero
+    # variance. Forced here by zeroing every node's encoded embedding
+    # (identical rows -> exact zero cross-node variance on a fresh board),
+    # checked on both the forward value and its gradient (the NaN risk is in
+    # the backward pass, not the forward one, where sqrt(0) == 0 is fine).
+    cfg = PRESETS["gn_base"]._replace(
+        width=8, layers=1, head_depth=1, feature_version=2, readout="multi"
+    )
+    net = GraphNet(jax.random.key(0), out_dim=1, cfg=cfg)
+    layout, state = _mid_game(2, steps=0)
+    sample = board_sample(layout, state, jnp.int32(0), version=2)
+    sample = sample._replace(nodes=jnp.zeros_like(sample.nodes))
+
+    def loss(m: GraphNet) -> jax.Array:
+        return m(sample)[0] ** 2
+
+    val, grad = eqx.filter_value_and_grad(loss)(net)
+    assert bool(jnp.isfinite(val))
+    leaves = jax.tree.leaves(eqx.filter(grad, eqx.is_inexact_array))
+    assert all(bool(jnp.isfinite(g).all()) for g in leaves)
 
 
 def test_hetero_off_ignores_tiles() -> None:

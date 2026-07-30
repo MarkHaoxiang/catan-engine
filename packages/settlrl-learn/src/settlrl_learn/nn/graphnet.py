@@ -18,16 +18,22 @@ Levers (``GraphNetConfig``):
   Cai et al. 2021: normalise across nodes with a learnable mean-shift);
 - ``global_node`` -- a virtual global node seeded from the global features and
   updated from a pooled summary each layer (O(N) long-range, no O(N^2) attention);
-- ``readout`` -- ``"mean"`` vs ``"multi"`` (mean ++ max ++ sum: ``sum`` keeps the
-  *count* signal -- how many settlements/cities are mine -- that ``mean`` washes
-  out, the PNA argument, Corso et al. 2020);
+- ``readout`` -- ``"mean"`` vs ``"multi"``. Version 1: mean ++ max ++ sum --
+  ``sum`` keeps the *count* signal -- how many settlements/cities are mine --
+  that ``mean`` washes out, the PNA argument, Corso et al. 2020. Version 2
+  (``feature_version>=2``): max ++ sum ++ std, dropping ``mean`` -- on this
+  fixed 54-node graph ``mean`` is a scalar multiple of ``sum`` (collinear), so
+  ``std`` replaces it with a statistic ``sum``/``max`` don't already carry;
 - ``jk`` -- jumping-knowledge: pool every layer's node state, not just the last
   (multi-scale, dodges over-smoothing);
 - ``layers`` / ``width`` / ``heads`` -- depth/capacity. Non-recurrent: each layer
   has its own weights;
 - ``feature_version`` -- which :mod:`settlrl_learn.nn.graph` feature set the trunk
   reads (it sizes the encoders, and every ``board_sample`` feeding this net must
-  pass the same version).
+  pass the same version). ``>=2`` also LayerNorms the pooled-readout ++
+  global-node context (``ctx``, :meth:`GraphTrunk.ctx`) before the value/
+  policy-context heads consume it -- v1 leaves ``g`` unnormalized and large
+  enough to dominate ``ctx`` by magnitude at init.
 """
 
 from __future__ import annotations
@@ -209,11 +215,22 @@ class _Layer(eqx.Module):
         return h_new, g, h_t_new
 
 
-def _pool(readout: str, h: Float[Array, "v w"]) -> Array:
+_STD_EPS = 1e-6
+"""Guards the v2 readout's std block against a NaN gradient through ``sqrt`` at
+exact zero cross-node variance (same convention as the LayerNorm/GraphNorm eps
+above)."""
+
+
+def _pool(readout: str, h: Float[Array, "v w"], version: int) -> Array:
     if readout == "mean":
         return h.mean(0)
     if readout == "sum":
         return h.sum(0)
+    if version >= 2:
+        # max ++ sum ++ std: std replaces the collinear mean (see the module
+        # docstring's `readout` bullet).
+        std = jnp.sqrt(h.var(0) + _STD_EPS)
+        return jnp.concatenate([h.max(0), h.sum(0), std])
     return jnp.concatenate([h.mean(0), h.max(0), h.sum(0)])  # multi (PNA-style)
 
 
@@ -230,13 +247,14 @@ class GraphTrunk(eqx.Module):
     """The shared message-passing trunk: encode the board graph, run the layers,
     and return the final per-node embeddings, the global vector, and the pooled
     readout (multi-scale if ``jk``). Both :class:`GraphNet` (single head) and the
-    AlphaZero value+policy net build their heads on this."""
+    AlphaZero value+policy net build their heads on this, via :meth:`ctx`."""
 
     node_enc: eqx.nn.Linear
     edge_enc: eqx.nn.Linear
     glob_enc: eqx.nn.Linear
     tile_enc: eqx.nn.Linear | None
     layers: tuple[_Layer, ...]
+    ctx_norm: eqx.nn.LayerNorm | None
     cfg: GraphNetConfig = eqx.field(static=True)
 
     def __init__(self, key: KeyScalar, cfg: GraphNetConfig) -> None:
@@ -257,6 +275,11 @@ class GraphTrunk(eqx.Module):
         else:
             self.tile_enc = None
         self.layers = tuple(_Layer(keys[off + i], cfg) for i in range(cfg.layers))
+        # LayerNorm has no random init (weight=ones, bias=zeros), so this costs
+        # no extra RNG key and cannot perturb the v1 key schedule above.
+        self.ctx_norm = (
+            eqx.nn.LayerNorm(readout_dim(cfg) + w) if cfg.feature_version >= 2 else None
+        )
         self.cfg = cfg
 
     def __call__(
@@ -269,15 +292,30 @@ class GraphTrunk(eqx.Module):
         e = jax.vmap(self.edge_enc)(s.edges)
         g = self.glob_enc(s.glob)
         h_t = jax.vmap(self.tile_enc)(s.tiles) if self.tile_enc is not None else None
+        version = self.cfg.feature_version
         pools = []
         for layer in self.layers:
             h, g, h_t = layer(h, e, g, h_t)
             if self.cfg.jk:
-                pools.append(_pool(self.cfg.readout, h))
-        readout = jnp.concatenate(pools) if self.cfg.jk else _pool(self.cfg.readout, h)
+                pools.append(_pool(self.cfg.readout, h, version))
+        readout = (
+            jnp.concatenate(pools)
+            if self.cfg.jk
+            else _pool(self.cfg.readout, h, version)
+        )
         if h_t is not None:
-            readout = jnp.concatenate([readout, _pool(self.cfg.readout, h_t)])
+            readout = jnp.concatenate([readout, _pool(self.cfg.readout, h_t, version)])
         return h, g, readout, h_t
+
+    def ctx(self, g: Array, readout: Array) -> Array:
+        """The value/policy-context heads' shared input: pooled readout ++
+        global node, LayerNorm'd under ``feature_version>=2`` (v1: unnormalized,
+        byte-identical to concatenating the two). Evidence: at v1 init, the
+        unnormalized blocks' norms (readout ~10, global ``g`` ~34) let ``g``
+        dominate the value head, correlating with an init value logit that is
+        ~80% constant bias."""
+        c = jnp.concatenate([readout, g])
+        return c if self.ctx_norm is None else self.ctx_norm(c)
 
 
 class GraphNet(eqx.Module):
@@ -295,7 +333,7 @@ class GraphNet(eqx.Module):
 
     def __call__(self, s: Sample) -> Float[Array, "out"]:
         _h, g, readout, _h_t = self.trunk(s)
-        return self.head(jnp.concatenate([readout, g]))
+        return self.head(self.trunk.ctx(g, readout))
 
 
 # Named presets: ``gn_base`` is plain message passing + mean readout (the closest

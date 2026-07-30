@@ -90,7 +90,7 @@ class BoardGNN(eqx.Module):
 
     def __call__(self, s: Sample) -> tuple[Value, Float[Array, f"flat={N_FLAT}"]]:
         h, g, readout, h_t = self.trunk(s)
-        ctx = jnp.concatenate([readout, g])
+        ctx = self.trunk.ctx(g, readout)
         return self.value(ctx)[0], self.policy(h, ctx, h_t)
 
 

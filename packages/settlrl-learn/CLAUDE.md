@@ -99,6 +99,23 @@ uses them.
     symmetry tests already permute tiles). Off by default and **bit-identical**
     to before (the non-hetero init is preserved by only consuming the extra RNG
     keys when hetero).
+    `feature_version>=2` (Task 2 of the featurization-v2 plan) changes two
+    things, both gated on the same flag as the wider globals (one gate, since
+    the four-arm study's `v2_base` needs all three together): the `"multi"`
+    readout pools `[max, sum, std]` instead of `[max, sum, mean]` — on this
+    fixed 54-node graph `mean` is a scalar multiple of `sum` (collinear;
+    correctness-audit evidence: a trained net's mean-block contribution had
+    std 0.081 vs the sum-block's 3.377) — and `GraphTrunk.ctx` (the pooled
+    readout ++ global node `g`, the shared input to the value head and the
+    policy's `other`/`type_bias` heads) is LayerNorm'd before those heads
+    consume it. v1's raw `ctx` sits ~25x over the L2 norm its random-init
+    heads are scaled for (sum-pooling over 54 nodes inflates magnitude
+    regardless of signal; the audit's own measurement: block norms ~373/10/7
+    vs `g`~34) — LayerNorm bounds it to `sqrt(dim)` by construction. Per-node
+    embeddings (`h`, `h_t`) feed the spatial heads directly and are
+    deliberately *not* normalized here — that would perturb the spatial
+    heads' scale relationships, out of scope. v1 is byte-exact (`ctx_norm`
+    is `None`, and `_pool`'s v1 branch is untouched).
   - `nn/action_layout.py` — the static map from the flat 662 action space to its
     board structure (per-vertex / -edge / -tile vs. dense "other") + `SCATTER` to
     place a factored head's compact logits back into the flat vector. The
