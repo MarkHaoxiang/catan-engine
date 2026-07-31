@@ -50,18 +50,21 @@ jobs:
           packages/settlrl-learn/tests/benchmark/test_training_benchmark.py
       - run: bash mypy_experiments.sh
       # Per-step timeouts: a hung suite fails in minutes with the culprit step
-      # named, instead of burning the job's whole budget.
-      - run: uv run --package settlrl-engine pytest packages/settlrl-engine/tests
+      # named, instead of burning the job's whole budget. The trailing `-n 2`
+      # overrides each package's dev-box xdist setting (-n 8/auto): one JAX
+      # process per physical runner core -- 8 multi-GB XLA workers thrash a
+      # 4-vCPU runner into a stall (same rationale as the experiments step).
+      - run: uv run --package settlrl-engine pytest packages/settlrl-engine/tests -n 2
         timeout-minutes: 8
       - run: uv run --package settlrl-game pytest packages/settlrl-game
         timeout-minutes: 5
-      - run: uv run --package settlrl-search pytest packages/settlrl-search/tests
+      - run: uv run --package settlrl-search pytest packages/settlrl-search/tests -n 2
         timeout-minutes: 5
-      - run: uv run --package settlrl-app pytest packages/settlrl-app
+      - run: uv run --package settlrl-app pytest packages/settlrl-app -n 2
         timeout-minutes: 10
-      - run: uv run --package settlrl-agents pytest packages/settlrl-agents/tests
+      - run: uv run --package settlrl-agents pytest packages/settlrl-agents/tests -n 2
         timeout-minutes: 10
-      - run: uv run --package settlrl-learn pytest packages/settlrl-learn/tests
+      - run: uv run --package settlrl-learn pytest packages/settlrl-learn/tests -n 2
         timeout-minutes: 10
       # Experiment tests (full, including `slow`): mostly config-composition
       # checks (seconds) plus one tiny end-to-end run per framework. `-n 2`
