@@ -17,21 +17,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
+  lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      # XLA compilation cache (written by the test conftests); keyed loosely --
-      # JAX validates entries itself, stale ones are just misses.
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/jax-settlrl
-          key: jax-settlrl-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-          restore-keys: jax-settlrl-${{ runner.os }}-
       - run: uv sync --locked
       - run: uv run ruff check packages
       - run: uv run ruff format --check packages
@@ -49,31 +42,57 @@ jobs:
           packages/settlrl-learn/tests/test_bench.py packages/settlrl-learn/tests/test_elo.py
           packages/settlrl-learn/tests/benchmark/test_training_benchmark.py
       - run: bash mypy_experiments.sh
-      # Per-step timeouts: a hung suite fails in minutes with the culprit step
-      # named, instead of burning the job's whole budget. The trailing `-n 2`
-      # overrides each package's dev-box xdist setting (-n 8/auto): one JAX
-      # process per physical runner core -- 8 multi-GB XLA workers thrash a
-      # 4-vCPU runner into a stall (same rationale as the experiments step).
-      - run: uv run --package settlrl-engine pytest packages/settlrl-engine/tests -n 2
-        timeout-minutes: 8
-      - run: uv run --package settlrl-game pytest packages/settlrl-game
-        timeout-minutes: 5
-      - run: uv run --package settlrl-search pytest packages/settlrl-search/tests -n 2
-        timeout-minutes: 5
-      - run: uv run --package settlrl-app pytest packages/settlrl-app -n 2
-        timeout-minutes: 10
-      - run: uv run --package settlrl-agents pytest packages/settlrl-agents/tests -n 2
-        timeout-minutes: 10
-      - run: uv run --package settlrl-learn pytest packages/settlrl-learn/tests -n 2
-        timeout-minutes: 10
-      # Experiment tests (full, including `slow`): mostly config-composition
-      # checks (seconds) plus one tiny end-to-end run per framework. `-n 2`
-      # pins xdist to one JAX process per physical runner core (~4GB peak
-      # each) rather than letting `auto` vary with the runner. The timeout is
-      # well above the observed ~2 min cold-cache cost: a smoke that regresses
-      # into a runaway budget fails here instead of eating the job's whole hour.
-      - run: WANDB_MODE=disabled uv run pytest experiments/tests -n 2
-        timeout-minutes: 10
+
+  # One job per suite so the wall-clock is the slowest suite, not the sum.
+  # The trailing `-n 2` overrides each package's dev-box xdist setting
+  # (-n 8/auto): one JAX process per physical runner core -- 8 multi-GB XLA
+  # workers thrash a 4-vCPU runner into a stall. Per-job timeouts name the
+  # culprit suite instead of burning a shared budget.
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: engine
+            cmd: uv run --package settlrl-engine pytest packages/settlrl-engine/tests -n 2
+            timeout: 10
+          - suite: game
+            cmd: uv run --package settlrl-game pytest packages/settlrl-game
+            timeout: 8
+          - suite: search
+            cmd: uv run --package settlrl-search pytest packages/settlrl-search/tests -n 2
+            timeout: 8
+          - suite: app
+            cmd: uv run --package settlrl-app pytest packages/settlrl-app -n 2
+            timeout: 12
+          - suite: agents
+            cmd: uv run --package settlrl-agents pytest packages/settlrl-agents/tests -n 2
+            timeout: 12
+          - suite: learn
+            cmd: uv run --package settlrl-learn pytest packages/settlrl-learn/tests -n 2
+            timeout: 12
+          # Full experiment tests including `slow`: config-composition checks
+          # plus one tiny end-to-end run per framework.
+          - suite: experiments
+            cmd: WANDB_MODE=disabled uv run pytest experiments/tests -n 2
+            timeout: 12
+    name: tests (${{ matrix.suite }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # XLA compilation cache (written by the test conftests); keyed loosely --
+      # JAX validates entries itself, stale ones are just misses.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/jax-settlrl
+          key: jax-settlrl-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: jax-settlrl-${{ runner.os }}-
+      - run: uv sync --locked
+      - run: ${{ matrix.cmd }}
 
   # The SPA build (tsc + vite). Catches type errors and broken/uncommitted
   # imports the Python suite can't see (the server runs no frontend code).
