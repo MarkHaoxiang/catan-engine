@@ -1338,7 +1338,7 @@
   "/api/lobbies/{lobby_id}/start": {
    "post": {
     "summary": "Start Lobby",
-    "description": "Host-only: materialise the lobby into a game. 409 while any human seat\nis still open (start a table only once every seat is decided). 202 with a\nplace in line when the server is at its game cap.",
+    "description": "Host-only: materialise the lobby into a game. 409 while any human seat\nis still open (start a table only once every seat is decided). A queued\nbody with a place in line when the server is at its game cap.",
     "operationId": "start_lobby_api_lobbies__lobby_id__start_post",
     "security": [
      {

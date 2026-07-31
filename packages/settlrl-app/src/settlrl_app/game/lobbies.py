@@ -1,9 +1,9 @@
 """Pre-game lobbies: a configurable staging table that becomes a game on start.
 
 A :class:`Lobby` holds only configuration and membership — never a
-``GameSession``. The board shown in the room is a preview from the seed (the
-game-free ``GET /api/preview``); the engine is built exactly once, at start, by
-materialising the lobby into a :class:`~settlrl_app.game.games.GameHandle`.
+``GameSession``. The board shown in the room is a preview derived from the
+seed; the engine is built exactly once, at start, by materialising the lobby
+into a :class:`~settlrl_app.game.games.GameHandle`.
 
 Keeping the two apart makes the illegal states unrepresentable: you cannot
 configure a game that has begun, and you cannot start a table that still has open

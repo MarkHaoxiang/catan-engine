@@ -393,8 +393,8 @@ def build(deps: Deps) -> APIRouter:
         x_seat_tokens: SeatTokens = None,
     ) -> _StartedModel | _QueuedModel:
         """Host-only: materialise the lobby into a game. 409 while any human seat
-        is still open (start a table only once every seat is decided). 202 with a
-        place in line when the server is at its game cap."""
+        is still open (start a table only once every seat is decided). A queued
+        body with a place in line when the server is at its game cap."""
         lobby = lobby_of(lobby_id)
         if 0 not in lobby.seats.owned(tokens(x_seat_tokens), uid(user)):
             raise HTTPException(status_code=403, detail="only the host can start")
