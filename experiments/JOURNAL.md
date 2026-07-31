@@ -178,3 +178,35 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   leaf/value ceiling, was the cause. Anchor minted: `az1_gnn96x4`
   (feature_version=1, gauntlet elo 109.86 ± 12.87) added as an arena rung
   in `conf/arena/scale.yaml`.
+- 0004 four-arm architecture study — **hetero passes, sole gate clear
+  (2026-07-30)**. Isolation test of three levers on top of the scale2 recipe
+  at v1's matched 300 iterations, each arm judged by its own 400-game final
+  gauntlet against the `+35`/0.55 gate (`conf/experiment/v2_{base,incidence,
+  hetero,deep}.yaml`): `v2_base` (v1 + v2 featurization only — Task 1/2's
+  global repairs + [max,sum,std]/LayerNorm readout, `gn_global` trunk) 33.914
+  ± 9.864 Elo, fail — runs/0004_alphazero/2026-07-30T142232Z (training, died
+  `CUDA_ERROR_OUT_OF_MEMORY` in the final gauntlet after completing all 300
+  iterations; fixed by a5bda5b, which clears jax's compilation caches before
+  the gauntlet compiles its own) + runs/0004_alphazero/2026-07-30T161824Z
+  (`resume_from` the first dir at the fix commit, gauntlet only). `v2_incidence`
+  (+ per-vertex incident-hex identity features, no new message passing) 40.862
+  ± 9.670, fail — runs/0004_alphazero/2026-07-30T165116Z. `v2_deep` (+2 more
+  GNN layers, 4→6, more reach/capacity over the same information) 35.728 ±
+  9.820, fail — runs/0004_alphazero/2026-07-30T222151Z. `v2_hetero` (`gn_global`
+  swapped for `gn_hetero` — hexes promoted to first-class nodes, vertex↔hex
+  message passing each layer) **76.171 ± 9.815, pass** — the first 300-iteration
+  gate clear ever, 46.5% vs the `az1_gnn96x4` anchor —
+  runs/0004_alphazero/2026-07-30T192420Z. Reading: `v2_base`/`v2_incidence`/
+  `v2_deep` are statistically indistinguishable (33.9–40.9, overlapping ±9.7–9.9
+  SE bands) — neither more reach (`v2_deep`) nor identity-as-features
+  (`v2_incidence`) moves the needle over the plain `v2_base` control — while
+  `v2_hetero` clears every control by ~3σ. The win is the hex-node
+  star-expansion **structure** itself, not reach and not raw information
+  content. Context: v2 featurization is worth ~+110 Elo over v1 at matched
+  300-iteration compute (v1's scale2_long in-loop reading at iter 299 was
+  −75.4; `v2_base`'s final gauntlet is +33.9). `v2_hetero`'s HNHN degree
+  normalization (the alpha/beta parameterization on the vertex↔hex
+  aggregation) is not implemented — this arm is plain `v2_base` + `gn_hetero`
+  with a segment-sum aggregation; degree norm stays a follow-up. A long
+  `v2_hetero` run (2500 iterations, matching scale2_long's budget) is
+  in-flight: runs/0004_alphazero/2026-07-31T010419Z.
