@@ -46,17 +46,19 @@ numbers.
 
 ## Checks
 
-Pre-commit hooks (ruff check/format, mypy over every package, the engine test
-suite) run on each commit — `uv run pre-commit install` after a fresh clone.
-CI (`.github/workflows/ci.yml`) runs the full gate on push/PR: lint, format
-check, mypy, and every package's test suite (including settlrl-agents, whose
-suite is too slow for a commit hook).
+Pre-commit hooks (ruff check/format, the stack-bound doc check, mypy over every
+package, mypy over the experiment frameworks, the engine test suite, and the
+fast experiment smoke) run on each commit — `uv run pre-commit install` after a
+fresh clone. CI (`.github/workflows/ci.yml`) runs the full gate on push/PR:
+lint, format check, mypy, and every package's test suite (including
+settlrl-agents, whose suite is too slow for a commit hook).
 
-Before finishing any session, ensure the mypy checker passes:
+Before finishing any session, ensure the mypy gate passes — the pre-commit
+hooks are the authoritative invocations:
 
 ```bash
-uv run --package settlrl-engine mypy packages/settlrl-engine/src packages/settlrl-engine/tests
-uv run --package settlrl-agents mypy packages/settlrl-agents/src packages/settlrl-agents/tests
+uv run pre-commit run mypy --all-files
+uv run pre-commit run mypy-experiments --all-files
 ```
 
 When CUDA is available (check `jax.devices("cuda")` or `nvidia-smi`), always run benchmarks directly on the GPU (`-k cuda`) — skip the CPU benchmark runs. Without CUDA, run CPU-only (`JAX_PLATFORMS=cpu`, or `-k cpu` for the benchmarks).

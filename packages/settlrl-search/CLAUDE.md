@@ -21,7 +21,7 @@ Module map:
 - `expectimax.py` — the setup-phase search (`make_setup_search`).
 - `policy.py` — the seat protocols and `AgentSpec` registry machinery.
 - `sample.py` — `sample_world` determinization.
-- `rows.py` — the flat-action decode (was `settlrl_agents.internal.rows`).
+- `rows.py` — the flat-action decode.
 - `value.py` — the `Value` / `ValueFunction` seam types.
 - `priors.py` — `TIER_SCORES`, the action-priority prior shared with greedy.
 
@@ -89,18 +89,16 @@ Module map:
 `make_search` / `make_search_weights` (`__init__.py`) are the
 re-determinizing **Single-Observer ISMCTS**: a custom fixed-capacity tree
 (`ismcts/`, `make_tree`) that determinizes a fresh `sample_world` per
-simulation and descends the live engine, filtering legality per simulation — the
-half mctx's fixed action axis could not express (Cowling 2012; the Canopy custom
-tree). Selection is mctx's Gumbel-MuZero ported onto it (no `mctx` dependency).
+simulation and descends the live engine, filtering legality per simulation
+(Cowling 2012; the Canopy custom tree). Selection is Gumbel-MuZero
+(Danihelka et al. 2022) on a custom tree.
 `make_search` argmaxes the improved policy; `make_search_weights` returns the
 distribution (the AlphaZero policy target — experiment 0004);
 `make_search_weights_value` returns `(distribution, root value)` — the searched
 root value (searcher frame, 2·P(win)−1) is the AZ value-blend `q` target, the
 visit-weighted mean of the root edges (`_run`). Shared prior/dice
 constants live in `_common.py`, the trade/lookahead/`num_trees` wrapper in
-`__init__.py`, the tree in `ismcts/`. It replaced a former
-`mcts`/`smcts`/`ismcts`/`lookahead` quartet (2026-06-17) then the `mctx` engine
-behind it (2026-06-19, 742b94b). ~5–6 ms/move (B=1 CPU; was 7.4 with mctx).
+`__init__.py`, the tree in `ismcts/`. ~5–6 ms/move (B=1 CPU).
 
 **One leaf evaluation per simulation (structural fix; GPU-neutral).** A leaf
 needs both a value and an expansion prior. On CPU, XLA does **not** merge two
@@ -165,11 +163,9 @@ strength lever:
 - `mcts` (frozen-world): per-simulation determinization is its principled
   superset, *parity not a win* at 3p (0.352 ± 0.031, n=244; 64 worlds 0.307 —
   more doesn't help; ~ties at 2p where the belief is ~exact).
-- the **mctx engine**: its fixed action axis no-oped illegal path-actions; the
-  custom tree reaches the same strength with true per-sim legality and faster.
 
-**Strength: ~0.55–0.58 vs lookahead** (2p seat-swapped, n≥220 GPU; h2h vs old
-mctx 0.49–0.52 across 16/32/64 sims). Contracts in `tests/test_ismcts.py`.
+**Strength: ~0.55–0.58 vs lookahead** (2p seat-swapped, n≥220 GPU). Contracts
+in `tests/test_ismcts.py`.
 
 Design choices, each fixing a measured ply-2 bias:
 - **Root prior = the raw one-step value sweep** (`values / prior_scale`, ±20

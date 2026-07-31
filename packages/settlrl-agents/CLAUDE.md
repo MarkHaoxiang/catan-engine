@@ -21,18 +21,17 @@ The API layer is the top-level modules — `value.py` (the heuristic's *weights*
 re-exporting the `Value`/`ValueFunction` types from `settlrl_search.value`),
 `evaluate.py`, the registry in `__init__.py` (which defines `search_policy` /
 `lookahead_policy` locally over `make_search` imported from `settlrl_search`),
-`cli.py` — plus the agents (`baselines.py`, `greedy.py`, `planner/`). The seat
-protocols (`policy.py`), world sampling (`sample.py`), and the flat-table decode
-(was `internal/rows.py`) now live in `settlrl-search`. `internal/` holds only
+`cli.py` — plus the agents (`baselines.py`, `greedy.py`, `planner/`).
+`internal/` holds only
 `feature_engineering.py` (the weight-free hand-engineered features —
 `board_features` for the value terms, `target_build` / `maritime_ratio` for
 greedy's trade sense). Weights always live with an agent or in `value.py`;
 features never carry them.
 
 The lab harness (`Run`/`start_run` bookkeeping + the pydantic/OmegaConf `Config`
-base) moved to `settlrl_learn.experiment` — it is a training-side concern, and
-relocating it keeps `settlrl-agents` (the play/serve library) free of
-`pydantic`/`omegaconf`. Experiments import it from there now.
+base) lives in `settlrl_learn.experiment` — a training-side concern, which
+keeps `settlrl-agents` (the play/serve library) free of
+`pydantic`/`omegaconf`.
 
 `service/` is the **one-bot SDK + service**. A service hosts a single `Bot`
 (`sdk.py`: subclass it, implement `act(view) -> MoveModel`; the framework tracks
@@ -55,9 +54,6 @@ serves one. It's the `settlrl-app` game server's only source of bot moves
 hook — render's conftest never checked engine types, so an int32 slipped by).
 
 ## API layer and agents
-
-The flat-table decode, the seat protocols (`AgentSpec` / `PolicyPrior` / …),
-and `sample_world` moved to `settlrl-search` (see its CLAUDE.md).
 
 - `value.py` — heuristic strength function; value = own strength − best
   opponent's. On a *sampled* world the "hidden" fields it reads are
@@ -110,7 +106,7 @@ and `sample_world` moved to `settlrl-search` (see its CLAUDE.md).
   and (a need advances or it consolidates toward scarcity). The discard
   prefers surplus before most-held. Still deliberately simple: never offers
   a trade (an obs-only policy has no rejected-offer memory), ignores whose
-  production the robber blocks. Greedy's tier table is `TIER_SCORES`, which now
+  production the robber blocks. Greedy's tier table is `TIER_SCORES`, which
   lives in `settlrl_search.priors` (greedy imports it) and is also the search's
   interior prior (`_TIER_LOGITS`) — the maritime gate lives in the bonus
   channel, so priors are unchanged.
@@ -136,7 +132,7 @@ and `sample_world` moved to `settlrl-search` (see its CLAUDE.md).
 The re-determinizing SO-ISMCTS search (`make_search` / `make_search_weights` /
 `make_search_weights_value`, the tree, the lookahead `num_simulations=0` case,
 the chance-node and action-ordering flags, the trade machinery) lives in the
-`settlrl-search` package now — see its CLAUDE.md. `__init__.py` here imports
+`settlrl-search` package — see its CLAUDE.md. `__init__.py` here imports
 `make_search` from it and defines the `search_policy` / `lookahead_policy`
 registry families locally.
 
@@ -234,23 +230,16 @@ Design invariants:
   annotations at test time — `sum()` of an empty generator is `int`, not
   `float`.
 
-Strength (seat-swapped, June 12 night, hybrid + opponent model): 85.0% vs
+Strength (seat-swapped, June 12, hybrid + opponent model): 85.0% vs
 greedy (n=200), **~55% vs lookahead** (54.7% and 55.7% on n=300 runs) and
 **49.6% vs mcts pooled** (546/1100 over the final configs) — tied with mcts
-at the top, clearly over lookahead; from 42% / 10% / — that morning. The
-arc: scripted push 75/45/40 (SpendDown, goal-switching margin,
-time-to-afford), tactic hybrid to 52/50 (value-arbitrated
-`OpportunisticBuild` +4.5, own-turn combos +2-3, leaf-pick delegation
-neutral), opponent integration to 55 vs lookahead (spot-race model +3.4;
-best-reply tie-break neutral). Gate planner tweaks at n ≥ 200 — n=100
+at the top, clearly over lookahead. Gate planner tweaks at n ≥ 200 — n=100
 probes swung ±6 points around the n=300 truth. The one measured trap:
 letting plain maritime sales dip into plan-reserved cards (47% → 29% vs
 lookahead, reverted; combos may, because the pair value prices the whole
 exchange). Move latency: the tactic sweep adds ~1 jit dispatch per decision
 on top of the ~0.1 ms/lane scripted tick; matches run ~1.5-2x slower than
-the pure-scripted planner. Next levers for outright #1: value-informed plan
-choice (multi-apply goal valuation), expectimax over the opponent's roll,
-or settlrl-learn's Stage 1 value dropped into tactic.py.
+the pure-scripted planner.
 
 ## cli.py
 
@@ -275,9 +264,9 @@ complete games (`_self_play` drives stateful specs lane by lane, mirroring
 `_evaluate_stepwise`). No per-agent internal-logic
 tests — a new agent just registers in `POLICIES`. settlrl-app's bot seam
 skips `StatefulSpec` families (its `bot_act` is per-move and stateless; a
-stateful seat there needs a per-session agent cache that doesn't exist yet). `sample_world`
-moved to `settlrl-search` along with its unit tests (`settlrl-search`'s
-`tests/test_sample.py`) — it's infrastructure, not a policy, so it never had
+stateful seat there needs a per-session agent cache that doesn't exist yet).
+`sample_world` lives in `settlrl-search` with its unit tests
+(`tests/test_sample.py`) — infrastructure, not a policy, so it has no
 protocol-level tests here.
 `tests/conftest.py` installs the jaxtyping/beartype hook for all
 `settlrl_agents` modules.

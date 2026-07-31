@@ -1,11 +1,13 @@
 # experiments — internal notes
 
 The lab-notebook contract is in README.md. The unit here is the experiment
-*framework*: a numbered directory holding `run.py` (named variants selected
-by argv), its own helper modules, and a report that accumulates one section
-per concluded variant. Don't scaffold a new number for a question an
-existing framework can express as a config — extend its `VARIANTS` instead;
-git history is the framework's changelog, the report its conclusions.
+*framework*: a numbered directory holding `run.py` and its named configs —
+`VARIANTS` deltas selected by argv, or hydra config groups + `experiment/`
+presets (0004; the harness section below covers the split) — its own helper
+modules, and a report that accumulates one section per concluded variant.
+Don't scaffold a new number for a question an existing framework can express
+as a config — add a variant or preset instead; git history is the framework's
+changelog, the report its conclusions.
 
 ## Shared harness — `settlrl_learn.experiment`
 
@@ -27,8 +29,7 @@ No shared libraries live under `experiments/` (only per-framework scripts +
     use `resolve` over an in-`run.py` `VARIANTS` dict. **0004 is the hydra pilot**:
     its `conf/` holds config groups + an `experiment/` preset dir (the former
     `VARIANTS`), composed by `@hydra.main` and validated into the nested
-    `AlphaZeroConfig`. hydra's cwd takeover (the reason it was first kept at
-    arm's length) is disabled in `conf/config.yaml` (`hydra.job.chdir: false`,
+    `AlphaZeroConfig`. hydra's cwd takeover is disabled in `conf/config.yaml` (`hydra.job.chdir: false`,
     `output_subdir: null`, run dir pointed into the gitignored `runs/`), so
     `start_run` keeps owning the run dir + manifest. `run.compose_config(overrides)`
     is the programmatic seam (smoke tests) that `@hydra.main` can't serve.
@@ -80,7 +81,7 @@ which already holds without it. A pure compose/resolve check never needs the
 marker, and a new real run shouldn't reach for it unless it's dramatically
 heavier than today's. `mypy_experiments.sh` checks each framework dir
 separately (the `run.py` modules would collide on one invocation) plus
-`new.py` and the tests; the shared harness is checked by the agents package
+`new.py` and the tests; the shared harness is checked by the learn package
 mypy. New frameworks: add a variants-resolve check, at most one tiny
 end-to-end case, and a `test_<nnnn>_*` name so the mypy loop picks the dir up
 automatically.
@@ -128,7 +129,7 @@ hand-tuned `heuristic_value` and the eventual win. The featurization
 with senders/receivers as module constants, plus the engineered vector) and the
 architectures (`settlrl_learn.nn.architectures`: `mlp_engineered` baseline,
 `mlp_flat` structure-blind, `deepset` set, `gnn` jraph `GraphNetwork` + readout)
-live in settlrl-learn now (their symmetry contracts are tested there); this
+live in settlrl-learn (their symmetry contracts are tested there); this
 framework only composes them. `train.py` is optax adamw + wandb (`mode`
 configurable; `disabled` in tests) + best-val equinox checkpointing,
 standardizing inputs on the train split.
@@ -139,8 +140,7 @@ with `XLA_PYTHON_CLIENT_PREALLOCATE=false` to coexist with other GPU work.
 First finding (report.md): a GNN over the *raw* board nearly matches the
 engineered-feature MLP (heuristic R² 0.978 vs 0.996; win AUC 0.825 vs 0.834),
 while a flat MLP on the same raw inputs is ≈chance — structure is what makes raw
-board features usable. Not yet promoted to a shipped value; close the win gap,
-then gate `lookahead(gnn)` through `settlrl-agents bench`.
+board features usable.
 
 The `road` target (seat-0 longest-road trail length) and the `ablate_*`
 variants drive the GraphNet lever ablation over `settlrl_learn.nn.graphnet.PRESETS`

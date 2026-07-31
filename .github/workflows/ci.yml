@@ -33,6 +33,8 @@ jobs:
       - run: >
           uv run mypy
           packages/settlrl-engine/src packages/settlrl-engine/tests
+          packages/settlrl-search/src
+          packages/settlrl-search/tests/test_ismcts.py packages/settlrl-search/tests/test_sample.py
           packages/settlrl-agents/src packages/settlrl-agents/tests
           packages/settlrl-app/src packages/settlrl-game/src
           packages/settlrl-learn/src
@@ -44,6 +46,7 @@ jobs:
       - run: bash mypy_experiments.sh
       - run: uv run --package settlrl-engine pytest packages/settlrl-engine/tests
       - run: uv run --package settlrl-game pytest packages/settlrl-game
+      - run: uv run --package settlrl-search pytest packages/settlrl-search/tests
       - run: uv run --package settlrl-app pytest packages/settlrl-app
       - run: uv run --package settlrl-agents pytest packages/settlrl-agents/tests
       - run: uv run --package settlrl-learn pytest packages/settlrl-learn/tests

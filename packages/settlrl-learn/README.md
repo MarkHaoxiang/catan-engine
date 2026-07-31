@@ -29,9 +29,10 @@ training libraries.
 Not imported by the package root (equinox / optax / flashbax stay off the
 shipped path); `experiments/` composes these.
 
-- `settlrl_learn.nn` — network definitions: the plain-JAX MLP (`mlp`) and the
+- `settlrl_learn.nn` — network definitions: the plain-JAX MLP (`mlp`), the
   equinox board-graph nets (`graph` / `graphnet` / `board_gnn` /
-  `architectures`).
+  `architectures`), and the flat-action board-structure map
+  (`action_layout`).
 - `settlrl_learn.training` — the self-play → replay → train → arena loop
   (`learn`) behind a `Backend` seam, with a flat-MLP and a board-GNN backend.
 - `settlrl_learn.experiment` — the lab harness (run bookkeeping + the

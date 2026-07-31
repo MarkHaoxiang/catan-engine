@@ -31,9 +31,9 @@ schema — the defaults live in the schema, named *variants* are deltas onto the
 and `key=value` arguments on the command line override either (OmegaConf
 dotlist: `maximise.iterations=1`). `Config.resolve(base, variant, overrides)`
 merges and validates; the *validated* config is what the run manifest pins. The
-shared harness (`Run` / `start_run` / `Config`) lives in that subpackage, not
-under `experiments/` — these directories hold only per-framework scripts and
-`new.py`.
+shared harness (`Run` / `start_run` / `Config`) lives in
+`settlrl_learn.experiment`, not under `experiments/` — these directories hold
+only per-framework scripts and `new.py`.
 
 ```
 uv run python experiments/new.py "<title>"                       # scaffold a framework
@@ -41,21 +41,14 @@ uv run python experiments/NNNN_slug/run.py [variant] [k=v...]     # resolve-base
 uv run python experiments/0004_alphazero/run.py +experiment=<name> [k=v...]  # hydra-based
 ```
 
-`0001_bench_smoke` is the minimal worked example;
-`0002_linear_value_fitting` a multi-variant framework; `0004_alphazero` composes
-its config with hydra (`conf/` groups + `experiment/` presets; `-m` for sweeps),
-including `nano`/`small`/`medium` wall-clock budget tiers (~1h / ~10h / ~100h of
-the same self-play recipe at increasing iteration counts).
+`0001_bench_smoke` is the minimal worked example; `0002_linear_value_fitting`
+and `0003_neural_board_architectures` are multi-variant frameworks;
+`0004_alphazero` composes its config with hydra (`conf/` groups + `experiment/`
+presets; `-m` for sweeps) — working recipes like `scale2`, the `v2_*` study
+arms, and the `bench_throughput` throughput probe.
 
 ## Checks
 
 Every framework is type-checked (`mypy_experiments.sh`, on pre-commit and CI).
-`experiments/tests/test_smoke.py` validates every named variant/preset resolves
-(cheap, no JAX) and exercises each framework's distinct real-run surfaces
-end-to-end at trivial budgets — usually one; 0004 keeps three (the ordinary
-run, the separate `mode=bench` wiring, and an anchor-checkpoint
-deserialization check) because each proves a different layer — never a
-strength claim. Keep those runs' budgets minimal and their `Run` in
-`tmp_path`. The whole suite (no marker filter) measures 91-129s cold; the
-heaviest of those runs is marked `slow` so pre-commit (`-m "not slow"`) skips
-it while CI runs the suite unfiltered.
+The test suite is composition checks: `uv run pytest experiments/tests` —
+details in `CLAUDE.md`.

@@ -22,7 +22,7 @@ engine-only seam primitives the search and its callers share.
 - `value.py` — the `Value` / `ValueFunction` seam types the search evaluates
   a leaf through.
 - `policy.py` — the seat protocols (`Policy` / `BeliefPolicy` / `GameAgent` /
-  `PolicyPrior`) and the `AgentSpec` registry machinery.
+  `PolicyPrior` / `ValuePrior`) and the `AgentSpec` registry machinery.
 - `sample.py` — `sample_world`: turn a `BeliefView` into one concrete world.
 - `rows.py` — the flat action table decoded once (`ROW_TYPE` / `ROW_PARAMS`
   and the host mirrors).

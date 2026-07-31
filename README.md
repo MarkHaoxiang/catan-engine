@@ -8,7 +8,7 @@ A fast, batched implementation of Settlrl, a hex-tile trading board game, built 
 |---|---|
 | [`settlrl-engine`](packages/settlrl-engine/) | The game engine — board generation, rules, and actions, vectorised in JAX. |
 | [`settlrl-game`](packages/settlrl-game/) | The shared game model: the plain-Python reference rules (the differential test oracle for `settlrl-engine`) plus the serialization / replay layer the app and bot service build on. Engine-free. |
-| [`settlrl-search`](packages/settlrl-search/) | The re-determinizing search over the engine — seat protocols, world sampling, and the SO-ISMCTS tree (`mcts`) plus one-step lookahead. |
+| [`settlrl-search`](packages/settlrl-search/) | The re-determinizing search over the engine — seat protocols, world sampling, and the SO-ISMCTS tree (`ismcts`) plus one-step lookahead. |
 | [`settlrl-agents`](packages/settlrl-agents/) | Agents that play the game — heuristics (greedy) and the search agents built on `settlrl-search` — plus a CLI for matches and benchmarks, and (`[service]`) the bot service that serves their moves over HTTP. |
 | [`settlrl-learn`](packages/settlrl-learn/) | Learned value and policy functions that plug into the agents. |
 | [`settlrl-app`](packages/settlrl-app/) | The web game server: REST + SSE API, async game runtime, storage, auth, and the browser frontend. |

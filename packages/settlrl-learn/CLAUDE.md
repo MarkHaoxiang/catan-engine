@@ -206,8 +206,7 @@ uses them.
     RAM is just the live pool (~0.6 GiB at those shapes); non-persistent pads to
     zero rows, 266 KiB. The adopted `scale2` preset (throughput wave,
     2026-07-28) runs B=512 — pad linear in `selfplay.batch`, **~3.6 GiB** — at a
-    measured ~1 s write: acceptable, superseding the original plan's 3 GB pad
-    tripwire (`docs/superpowers/plans/2026-07-28-throughput-wave-1.md`). If that
+    measured ~1 s write: acceptable. If that
     cost ever bites, the lever is a pad bound below `max_game_len`, not the
     fixed shape. `save_run_state` writes to a sibling `.tmp` and `os.replace`s
     it into place — atomic, so a kill mid-write (the validated long-run
@@ -345,10 +344,12 @@ uses them.
     `learn(..., net_opponents={name: (spec, elo, every)})` → `run_arena`: ready
     play specs, so the library never learns about checkpoint files or
     architectures — the experiment composes them (0004's `anchors.load_anchor`
-    + `GNNBackend.play_agent`; the az0 rung sits at −58, calibrated by a joint
-    round-robin MLE — 0001_bench_smoke's `calibrate` variant, JOURNAL
-    2026-07-29 — superseding the earlier provisional −100 from its 0.361 vs
-    lookahead alone). They're scheduled by their own `every`, reported as
+    + `GNNBackend.play_agent`; the frozen ladder is three rungs — az0 −58 /
+    az1 +109.86 / az2 +186.76, all in `experiments/0004_alphazero/anchors/`,
+    seated via `net_opponents` in `conf/arena/scale.yaml`. az0's Elo is
+    calibrated by a joint round-robin MLE — 0001_bench_smoke's `calibrate`
+    variant, JOURNAL 2026-07-29; az1/az2's Elos are their own final-gauntlet
+    readings). They're scheduled by their own `every`, reported as
     `arena_vs_<name>`, and join the same Elo MLE; their seeds start at `seed +
     steps.NET_OPPONENT_SEED_BASE` (50k — room for five registry opponents), so
     adding one leaves the registry opponents' games bit-identical — a mid-rung
@@ -400,12 +401,11 @@ uses them.
     positions only (value-only playout-cap positions are skipped; value trains on
     all); with `train_policy` all 1 it is the plain mean (bit-exact-preserving).
 
-The gates (June 11 plan; value-tuning evidence in settlrl-agents/CLAUDE.md,
-search/leaf evidence in settlrl-search/CLAUDE.md): Stage 1 ships a
-value only if `lookahead(net)` beats `lookahead(heuristic)` at ≥2σ, n≥400
-(`settlrl-agents bench`); Stage 2 reruns the sims ladder — depth pays nowhere
-with the stationary heuristic leaf, and that falsification is the reason this
-package exists; Stage 3 (policy head, self-play iteration) only after.
+The promotion gate (value-tuning evidence in settlrl-agents/CLAUDE.md,
+search/leaf evidence in settlrl-search/CLAUDE.md): a run ships via the
+final-gauntlet Elo gate — `arena_elo − 2·se ≥ 35`
+(experiments/0004_alphazero's `arena_helpers.gauntlet_verdict`) — cleared
+twice (az1, az2 — JOURNAL 2026-07-30/31).
 
 ## Reference: Canopy (`cullback/canopy`)
 
@@ -415,8 +415,7 @@ ours). It sits past our leaf-is-the-ceiling gate: learned policy + WDL value
 head, self-play, Gumbel improved-policy interior selection + PUCT/Dirichlet
 root (800 sims), explicit chance nodes for dice and dev draws, and
 Single-Observer ISMCTS filtering per-simulation legality in a custom tree
-(ours does this too now — `settlrl_search.ismcts`, which retired the mctx
-engine). 1v1 only, so it never meets the 3-4p paranoid-frame / opponent-model
+(ours does this too — `settlrl_search.ismcts`). 1v1 only, so it never meets the 3-4p paranoid-frame / opponent-model
 problem, and it *disables determinization during self-play* (the net learns
 the Bayesian-average-over-hands policy; determinize only at play time).
 
@@ -428,8 +427,6 @@ Techniques aimed at Catan's dice variance (the variance-starved-depth problem):
   (`cfg.search.chance_nodes`/`dev_chance`, above; details in
   settlrl-search/CLAUDE.md). Canopy also forces a canonical **action ordering**
   to cut transpositions — **done** (`cfg.search.ordered`, above).
-- **EMA auxiliary value heads** at horizons (e.g. `[4, 10, 30]`), trained on
-  `ema = α·Q[t] + (1−α)·ema`, sharing the trunk — *not yet*.
 - **Playout-cap randomization** (KataGo): most moves a small search, a fraction
   the full budget; only full-search positions contribute policy targets —
   **done** (`selfplay.pcr_full_prob`/`pcr_fast_sims`, mechanics under
