@@ -11,10 +11,15 @@ env:
   # GPU and shouldn't download the NVIDIA wheels.
   UV_NO_GROUP: cuda
 
+# A newer push supersedes the in-flight run; only HEAD needs verifying.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -44,12 +49,20 @@ jobs:
           packages/settlrl-learn/tests/test_bench.py packages/settlrl-learn/tests/test_elo.py
           packages/settlrl-learn/tests/benchmark/test_training_benchmark.py
       - run: bash mypy_experiments.sh
+      # Per-step timeouts: a hung suite fails in minutes with the culprit step
+      # named, instead of burning the job's whole budget.
       - run: uv run --package settlrl-engine pytest packages/settlrl-engine/tests
+        timeout-minutes: 8
       - run: uv run --package settlrl-game pytest packages/settlrl-game
+        timeout-minutes: 5
       - run: uv run --package settlrl-search pytest packages/settlrl-search/tests
+        timeout-minutes: 5
       - run: uv run --package settlrl-app pytest packages/settlrl-app
+        timeout-minutes: 10
       - run: uv run --package settlrl-agents pytest packages/settlrl-agents/tests
+        timeout-minutes: 10
       - run: uv run --package settlrl-learn pytest packages/settlrl-learn/tests
+        timeout-minutes: 10
       # Experiment tests (full, including `slow`): mostly config-composition
       # checks (seconds) plus one tiny end-to-end run per framework. `-n 2`
       # pins xdist to one JAX process per physical runner core (~4GB peak
