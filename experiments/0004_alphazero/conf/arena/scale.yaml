@@ -29,3 +29,9 @@ net_opponents:
   az1_gnn96x4:
     elo: 109.86
     every: 1
+  # v2_hetero's finished checkpoint (2500 iters, second gate pass -- the
+  # hypergraph trunk on v2 features): elo is its own final-gauntlet reading,
+  # gauntlet-calibrated 2026-07-31 at this same scope -- see JOURNAL.md.
+  az2_hetero96x4:
+    elo: 186.76
+    every: 1

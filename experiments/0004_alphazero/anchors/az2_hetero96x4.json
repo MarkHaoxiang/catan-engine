@@ -1,0 +1,46 @@
+{
+  "preset": "gn_hetero",
+  "width": 96,
+  "layers": 4,
+  "head_depth": 2,
+  "feature_version": 2,
+  "incidence": false,
+  "source_run": "runs/0004_alphazero/2026-07-31T073531Z",
+  "source_argv": "+experiment=v2_hetero n_iterations=2500 checkpoint_every=10 resume_from=runs/0004_alphazero/2026-07-31T010419Z",
+  "provenance": {
+    "note": "v2_hetero (hex-node star-expansion hypergraph trunk on v2 features), 2500 iterations, bit-exactly resumed at iteration 980 across two segments",
+    "segment_1": {
+      "run": "runs/0004_alphazero/2026-07-31T010419Z",
+      "argv": "+experiment=v2_hetero n_iterations=2500 checkpoint_every=10",
+      "iterations": "0-980",
+      "git_commit": "a5bda5b84f95e706dda2eb50329cb98cf4816c52"
+    },
+    "segment_2": {
+      "run": "runs/0004_alphazero/2026-07-31T073531Z",
+      "argv": "+experiment=v2_hetero n_iterations=2500 checkpoint_every=10 resume_from=runs/0004_alphazero/2026-07-31T010419Z",
+      "iterations": "980-2500",
+      "git_commit": "c225a14f1d76ac286a57ff877be4722203b65804"
+    }
+  },
+  "gauntlet": {
+    "verdict": "pass",
+    "arena_elo": 186.75910464793662,
+    "arena_elo_se": 10.876995383930197,
+    "arena_winrate_vs_lookahead": 0.7402597402597403,
+    "arena_vs_random": 1.0,
+    "arena_vs_az0_gnn96x4": 0.8179611650485437,
+    "arena_vs_az1_gnn96x4": 0.6013986013986014,
+    "best_arena_winrate": 0.8070175438596491,
+    "gate_elo": 35.0,
+    "gate_winrate": 0.55,
+    "final_games": 400
+  },
+  "search_semantics": {
+    "note": "arena/search settings this gauntlet elo is only valid under -- same scope az0's calibration recorded (experiments/JOURNAL.md's 2026-07-29 scale-reset entry); a differently-configured arena needs its own calibration.",
+    "sims": 24,
+    "considered": 16,
+    "chance_nodes": false,
+    "dev_chance": true,
+    "ordered": false
+  }
+}

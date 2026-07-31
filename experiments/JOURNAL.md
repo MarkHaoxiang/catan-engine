@@ -210,3 +210,24 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   with a segment-sum aggregation; degree norm stays a follow-up. A long
   `v2_hetero` run (2500 iterations, matching scale2_long's budget) is
   in-flight: runs/0004_alphazero/2026-07-31T010419Z.
+- 0004 `v2_hetero` long run — **second gate pass, az2 minted (2026-07-31)**.
+  The study's follow-up at scale2_long's full budget: `+experiment=v2_hetero
+  n_iterations=2500 checkpoint_every=10`, bit-exactly resumed at iteration
+  980 across runs/0004_alphazero/2026-07-31T010419Z (iters 0–980, git
+  a5bda5b) and runs/0004_alphazero/2026-07-31T073531Z (`resume_from` the
+  first dir, iters 980–2500, git c225a14; the pause was a host restart, not a
+  crash). Final 400-game gauntlet: `arena_elo` **186.759 ± 10.877** SE (lower
+  bound +165.0 vs. the +35 gate), 0.7403 vs. lookahead, 0.6014 vs. the
+  frozen az1 anchor, 0.8180 vs. az0, 1.0 vs. random, `best_arena_winrate`
+  0.8070 (`runs/.../result.json`). In-loop trajectory across both segments:
+  +0.6 @ 149 → +44.6 @ 299 → +117.4 @ 449 → +168.2 @ 749 → +206.7 @ 1049 →
+  +232.2 @ 1349 → +240.5 @ 1799 → +257.3 @ 2099 → +250.9 @ 2399 → +186.76
+  (final gauntlet; the 64-game in-loop reads carry ±22–24 SE and select the
+  round's `best.eqx`, so the tighter gauntlet number is the citable one).
+  Reading: the hypergraph advantage **compounds with compute** — v2_hetero
+  reaches v1 scale2_long's final +110 level by iteration ~449 (v1 needed
+  2500) and finishes +77 Elo above it at matched budget; it cleared +0.6 at
+  iter 149 where v1 sat at −211.8. Anchor minted: `az2_hetero96x4`
+  (`gn_hetero`, feature_version=2, gauntlet elo 186.76 ± 10.88) added as an
+  arena rung in `conf/arena/scale.yaml` — the ladder is now az0 −58 / az1
+  +109.86 / az2 +186.76.
