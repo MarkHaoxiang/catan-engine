@@ -165,7 +165,7 @@ def create_app(
             await bots.aclose()
         await database.dispose()
 
-    app = FastAPI(title="Settlrl Render", lifespan=lifespan, root_path=root_path)
+    app = FastAPI(title="Settlrl", lifespan=lifespan, root_path=root_path)
 
     @app.middleware("http")
     async def _limit_body(

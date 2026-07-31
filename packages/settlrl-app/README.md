@@ -24,20 +24,22 @@ A help page (`/help`, the **?** button) documents the controls and icons.
 
 **Replay** (`/replay`) — step through a recorded game. Load a saved game-record file (the JSON from `GET /api/games/{id}/record`) or the live game so far, then scrub with the slider, step move by move, or press play; the log fills in as the game advances, and the record can be saved back to a file.
 
-Each game is a plain-Python `settlrl-reference` game; the server holds many live
+Each game is a plain-Python `settlrl-game` game; the server holds many live
 games at once, addressed by id.
-Claiming a human seat (creating or joining a game) issues a bearer token, and every request
+Claiming a human seat (hosting or joining) issues a bearer token, and every request
 proves its seats via the `X-Seat-Tokens` header: snapshots are per-seat views — your own
 hand arrives in full, everyone else's only as public counts, and the legal-move list only
-ships to the seat whose turn it is. Games are shareable: the 🔗 button copies the invite
-link, and opening it claims a free human seat (or spectates when none is left). You keep your
-seats through your signed-in account or this browser's storage. A game with unclaimed human seats stays in its
-**[lobby room](#lobby)** (`/lobby/{id}`) — the host sets up the board, seats, and win target there
-while players join and chat — and begins on its own once every human seat is filled (the host can
-bot-fill the open seats to start now); the server serves no moves and advances neither bots nor
-turn timeouts until then, and opening `/play/{id}` for a game that hasn't started bounces to its
-lobby room. A game can also be **listed** so it appears in the public lobby (below) for anyone to
-join, instead of being invite-link only.
+ships to the seat whose turn it is. You keep your seats through your signed-in account or
+this browser's storage.
+Pre-game staging is a **[lobby](#lobby)** (`/lobby/{id}`), not a game: a lobby holds
+configuration and membership only, the room renders a board *preview* from the seed, and
+the engine is built exactly once, when the host starts it — there is no game id until then.
+An **online** lobby's human seats start open for others to join (the 🔗 button copies the
+invite link) and it can be **listed** in the public lobby (below) for anyone to join; a
+**hotseat** lobby claims every human seat for the host's screen, so it can start at once.
+Start is host-only and refuses while any human seat is still open, so a half-empty table
+can never begin; on start the claimed seats — tokens and all — and the chat carry into the
+fresh game and everyone is sent to `/play/{id}`.
 The server
 pushes state: each client holds an event stream (`GET /api/games/{id}/events`, SSE) and
 receives its per-seat snapshot on every change, and bot seats are played by a server-side
@@ -187,26 +189,29 @@ end-of-game screen's **Download replay** button saves.
 ## Lobby
 
 The menu's **Play** card opens the **Lobby** page (`/lobby`, public), the entry
-point for online play: **Host a game**, **Quick Match**, or join an open game.
-The open-games list shows the games created with **List in lobby** that still
-have an unclaimed human seat, newest first (`GET /api/lobby`); each row shows its
-player count, seats filled, and map, and **Join** opens the game and claims a
-free seat.
+point for online play: **Host a game**, **Quick Match**, or join an open lobby.
+The open list shows the lobbies created with **List in lobby** that still have
+an open human seat, newest first (`GET /api/lobbies`); each row shows its player
+count, open seats, and map, and **Join** claims a free seat and opens the room.
 
-**Host a game** creates a game right away and drops you into its **lobby room**
-(`/lobby/{id}`) — a three-column page (players, the map and settings, and chat)
-that is the game's pre-start staging area. Because the game already exists, the
-room renders its live board and the host's edits reconfigure it in place
-(`POST /api/games/{id}/configure`, host-only and only before the first move): the
-host changes the map (seed / number placement), player count, win target, and per
--seat human-or-bot, and toggles **List in lobby** / **Open to Quick Match** — all
-streamed to every participant, with the game id, the seat claims, and the chat
-preserved across each change. **Start game** bot-fills the still-open seats; once
-every human seat is claimed the game starts and everyone is sent into `/play/{id}`.
-Listing a game publicly requires a signed-in account (`POST /api/games` with
-`listed` returns `401` otherwise); anonymous play stays invite-link only. A
-listed game the host also marks `searchable` shows a **Quick Match** tag in its
-lobby row (a visibility flag; the matchmaker still forms its own games).
+**Host a game** opens a **lobby** (`POST /api/lobbies`) and drops you into its
+**lobby room** (`/lobby/{id}`) — a three-column page (players, the map and
+settings, and chat) where the table is staged. A lobby holds configuration and
+membership, never a game: the room renders a board preview from the seed, and
+the host's edits (`POST /api/lobbies/{id}/configure`, host-only) change the map
+(seed / number placement), player count, win target, and per-seat human-or-bot,
+and toggle **List in lobby** / **Open to Quick Match** — all streamed to every
+participant, with the seat claims and the chat preserved across each change. A
+lobby is either **online** (human seats start open and others join them) or
+**hotseat** (the host's browser drives every human seat, so it can start at
+once). Listing a lobby publicly requires a signed-in account (`listed` returns
+`401` otherwise); anonymous play stays invite-link only. **Start game**
+(`POST /api/lobbies/{id}/start`, host-only) refuses while any human seat is
+still open (`409`) — seat a bot there or wait for a joiner — then builds the
+engine, carries the claimed seats (tokens and all) and the chat into the fresh
+game, and everyone is sent into `/play/{id}`. A listed lobby the host also
+marks `searchable` shows a **Quick Match** tag in its row (a visibility flag;
+the matchmaker still forms its own games).
 
 **Quick Match** pairs you into a game with one click (`POST /api/matchmake`,
 2- or 4-player). Waiters are pooled per player count and matched on their
@@ -282,7 +287,7 @@ Registrations live in memory, so re-register services after a restart.
 ## Tests
 
 The app builds its board coordinate tables and resource / dev-card
-orderings from `settlrl-reference`'s geometry and enums, and defines its own
+orderings from `settlrl-game`'s geometry and enums, and defines its own
 flat action space over reference actions; the test suite checks the geometry is
 well-formed, pins the enum-derived orderings, and round-trips the flat table
 (every legal flat reconstructs a legal reference action and maps back to itself).
@@ -313,16 +318,24 @@ BASE=http://localhost:8000 npm run e2e
 
 | Endpoint | Description |
 |---|---|
-| `POST /api/games` | Create a game `{ "seed", "n_players": 2 \| 4, "number_placement", "seats": [...], "claim": "all" \| "first" \| "none", "listed"?, "searchable"?, "victory_points_to_win"?, "ticket"? }` — returns the game id and the creator's seat tokens. At the concurrency cap, returns `202` with a queue position `{ "queued": true, "ticket", "position", "total" }`; re-POST with the `ticket` to keep your place until a slot frees. `listed`/`searchable` require a signed-in account (`401` otherwise) |
-| `POST /api/games/{id}/join` | Claim a human seat `{ "seat"?: <n> }` (first free one by default) — returns the seat and its token. `409` when taken/full |
-| `POST /api/games/{id}/seats` | Retarget an unclaimed seat before play `{ "seat", "kind": "human" \| <bot kind> }` (any player in the game) — `403` for outsiders, `409` if the seat is taken or the game has started |
-| `POST /api/games/{id}/configure` | Reconfigure a not-yet-started game (the lobby room) — any of `{ "seed"?, "n_players"?, "number_placement"?, "seats"?, "victory_points_to_win"?, "listed"?, "searchable"? }`, merged onto the current setup. Host only (seat-0 owner, `403` otherwise); `409` once a move is played. Rebuilds the board in place, keeping the game id, the surviving seat claims, and the chat |
+| `POST /api/games` | Create an all-bot game `{ "seed", "seats": [<bot kind>, ...] }` (2–4 seats, bots playing each other) — returns `{ "id" }`. A `"human"` seat is `422` (host a lobby instead), as is an unknown bot kind or one that doesn't support the count; `503` when every game slot is taken |
 | `GET /api/games/{id}` | The requester's snapshot: board + status + their legal moves (`X-Seat-Tokens` header; omit to spectate) |
 | `POST /api/games/{id}/action` | Apply the acting seat's move `{ "flat": <action index> }` — `403` without that seat's token, `409` if illegal |
 | `GET /api/games/{id}/events` | Server-sent events: the requester's snapshot immediately, then again on every change (`bot_move` carries the server-paced bot play just made) |
 | `POST /api/games/{id}/chat` | Append a chat message `{ "text", "player"?: <owned seat> }` (no seat: spectator) |
 | `GET /api/games/{id}/record` | The finished game as a replayable `GameRecord` transcript — served for past games too, rebuilt from the store (`409` while running; `404` if unknown) |
 | `POST /api/games/{id}/replay` | Load a finished game for replay — a past game too (`409` while running; `404` if unknown) |
+| `POST /api/lobbies` | Open a lobby `{ "mode": "online" \| "hotseat", "seed", "n_players": 2 \| 4, "number_placement", "victory_points_to_win"?, "listed"?, "searchable"? }` — returns the lobby id and the host's seat tokens (seat 0 online; every human seat hotseat). `listed`/`searchable` require a signed-in account (`401` otherwise) |
+| `GET /api/lobbies` | Open lobbies anyone can join (listed, with a free human seat), newest first (public; see [Lobby](#lobby)) |
+| `GET /api/lobbies/{id}` | The requester's lobby snapshot: config, seats, chat, and the board preview rendered from the seed |
+| `GET /api/lobbies/{id}/events` | Server-sent events: the requester's lobby snapshot immediately, then again on every change (joins, seat edits, config, chat), and once more carrying `started_game_id` when the game begins |
+| `POST /api/lobbies/{id}/configure` | Reconfigure the lobby — any of `{ "seed"?, "n_players"?, "number_placement"?, "victory_points_to_win"?, "listed"?, "searchable"? }`, merged onto the current config. Host only (seat-0 owner, `403` otherwise); changing the player count rebuilds the seat list, keeping the host |
+| `POST /api/lobbies/{id}/seats` | Host-only: retarget a seat `{ "seat", "kind": "human" \| <bot kind> }` — a bot, or human (opens it online / takes it hotseat). `409` for seat 0 or a seat another player holds; `422` for an unknown bot kind |
+| `POST /api/lobbies/{id}/join` | Claim an open human seat `{ "seat"?: <n> }` (first free one by default) in an online lobby — returns the seat and its token. `409` when taken/full or the lobby isn't joinable |
+| `POST /api/lobbies/{id}/leave` | Free your seats; the host (seat 0) leaving closes the whole lobby. `403` if you hold no seat here |
+| `POST /api/lobbies/{id}/chat` | Append a chat message `{ "text", "player"?: <owned seat> }` — carried into the game's log on start |
+| `POST /api/lobbies/{id}/start` | Host-only: build the engine and materialise the lobby into a game — returns `{ "game_id" }` (the lobby SSE carries everyone into `/play/{id}`). `409` while any human seat is still open (no bot-fill). At the concurrency cap, returns a place in line `{ "queued": true, "ticket", "position", "total" }` — re-POST with the `ticket` to keep it — and `503` when the registry is full outright |
+| `GET /api/replay` | The loaded replay's opening state, or `null` when none is loaded |
 | `POST /api/replay` | Load a game record (the record JSON) for replay; returns the opening state. `422` if malformed |
 | `GET /api/replay/state?move=N` | The loaded replay after `N` moves (0 = the opening board). `404` until a replay is loaded |
 | `GET /api/replay/record` | The loaded replay's record JSON (to save it to a file) |
@@ -331,7 +344,6 @@ BASE=http://localhost:8000 npm run e2e
 | `GET /api/me/games` | The signed-in user's live games — seats follow the account across devices |
 | `GET /api/me/history` | The signed-in user's finished games (newest first) — replayable / downloadable by id |
 | `GET /api/leaderboard` | Elo ratings for accounts and bots, per player-count bucket, best first (public; see [Leaderboard](#leaderboard)) |
-| `GET /api/lobby` | Open games anyone can join (listed, non-terminal, with a free human seat), newest first (public; see [Lobby](#lobby)) |
 | `POST /api/matchmake` | Elo Quick Match `{ "n_players": 2 \| 4, "ticket"? }` — returns `{ "queued": true, "ticket", "waiting" }` to re-poll, or `{ "id", "seat", "token" }` once matched (bots fill the rest; see [Lobby](#lobby)) |
 | `GET` · `POST` · `DELETE /api/admin/bot-providers` | Manage remote bot services (admin; see [Bot services](#bot-services)) |
 | `GET /docs` | Interactive API docs (Swagger UI) |
@@ -364,11 +376,12 @@ packages/settlrl-app/
 │   ├── server.py        # create_app composition root: wires the app, mounts routers + SPA
 │   ├── api/             # the HTTP layer (game model + serialization is settlrl-game)
 │   │   ├── deps.py        # Shared request helpers + the runtime context (Deps) routers close over
-│   │   ├── routers/       # Routes by area: games, replay, bots, me, leaderboard, lobby, admin (each build(deps) -> APIRouter)
+│   │   ├── routers/       # Routes by area: games, lobbies, quickmatch, replay, bots, me, leaderboard, admin (each build(deps) -> APIRouter)
 │   │   ├── views.py       # Per-seat snapshots: the hidden-information boundary
 │   │   └── openapi.py     # Schema dump backing the generated frontend types
 │   ├── game/            # the live game runtime
-│   │   ├── games.py       # Game registry: ids, per-game locks, seat claims (tokens), the lobby gate
+│   │   ├── games.py       # Game registry: ids, per-game locks, seat claims (tokens), the create queue
+│   │   ├── lobbies.py     # Pre-game lobbies: config + membership staging, materialised into a game on start
 │   │   ├── driver.py      # Per-game asyncio task: bot pacing (remote) + idle-turn timeouts
 │   │   ├── matchmaking.py  # Elo Quick Match: pool waiters per count, pair + bot-fill the table
 │   │   └── replay.py      # ReplaySession: a loaded record replayed into per-move snapshots
@@ -384,7 +397,7 @@ packages/settlrl-app/
     ├── openapi.json     # Committed wire schema (pinned by pytest; npm run gen-api)
     ├── e2e/             # Browser end-to-end checks (npm run e2e)
     └── src/
-        ├── App.tsx          # Routes: menu, /play/:id, /lobby, /lobby/:id, /help, /profile, /leaderboard, /replay, /admin
+        ├── App.tsx          # Routes: menu, /play (→ /lobby), /play/:id, /lobby, /lobby/:id, /login, /register, /help, /profile, /leaderboard, /replay, /admin
         ├── lib/hex.ts        # Axial/cube → pixel conversion, hex corner math, coord equality
         ├── lib/api.ts        # JSON fetch wrapper (ApiError) + the SSE reader
         ├── lib/client.ts     # Typed REST client (openapi-fetch) from the schema, auth-injecting
@@ -392,13 +405,20 @@ packages/settlrl-app/
         ├── lib/boardData.ts  # Board types + palette + resource/card constants + adaptBoard
         ├── lib/api-schema.d.ts # Wire types generated from openapi.json (do not edit)
         ├── lib/game.ts       # Live-game API client (/api/game*)
+        ├── lib/lobby.ts      # Lobby API client (/api/lobbies*)
+        ├── lib/useLobby.ts   # Hook driving one lobby (snapshot over its SSE stream, chat)
         ├── lib/transfers.ts  # Diff two snapshots into card-transfer animations (production / steals)
         ├── lib/replay.ts     # Replay API client (/api/replay*)
         ├── lib/actionMeta.ts # Action display metadata: icons, labels, costs, confirm phrasing
         ├── lib/useGame.ts    # Hook driving one live game (snapshot stream, act / chat)
         ├── lib/seats.ts      # Seat tokens this browser holds, per game (localStorage)
+        ├── lib/auth.ts       # Account / auth client (/api/auth*): bearer token in localStorage
+        ├── lib/admin.ts      # Admin client (/api/admin/*): the bot-service registrations
+        ├── lib/clientId.ts   # Stable anonymous browser id (the X-Client-Id guest guard)
         ├── lib/viewport.ts   # useTableViewport: pan / zoom / rotate (mouse, touch, keyboard)
         ├── lib/theme.ts      # Light / dark theme switching (persisted)
+        ├── lib/sound.ts      # Action sound effects, derived from new game-log entries
+        ├── lib/cx.ts         # Class-name joiner for conditional CSS-module classes
         ├── lib/ui.ts         # The few board-layer style helpers the SVG renderers still need
         ├── index.css         # Design tokens (theme colours + spacing/radii/type) + keyframes
         ├── styles/ui.module.css # Shared CSS-module classes (panel, button, page/toolbar, …)
@@ -406,17 +426,29 @@ packages/settlrl-app/
         ├── pages/
         │   ├── Menu.tsx       # Landing page: choose Play (the lobby), Replay, or Leaderboard
         │   ├── PlayView.tsx   # Play mode: game state + handlers wiring the components below
-        │   ├── LobbyView.tsx  # Lobby hub: host a game, Quick Match, or join an open one
-        │   ├── LobbyRoom.tsx  # A game's pre-start room (/lobby/:id): players / map+settings / chat
+        │   ├── LobbyView.tsx  # Lobby hub: host a game, Quick Match, or join an open lobby
+        │   ├── LobbyRoom.tsx  # A lobby's staging room (/lobby/:id): players / map+settings / chat
+        │   ├── AuthView.tsx   # Sign-in / registration page (/login, /register)
+        │   ├── ProfileView.tsx # Profile: live games + finished-game history
+        │   ├── LeaderboardView.tsx # Per-player-count Elo ladders
+        │   ├── AdminView.tsx  # Superuser status page + bot-service management
         │   ├── HelpView.tsx   # Help page: controls, action icons, seats
         │   └── ReplayView.tsx # Replay mode: load a record, scrub / step / play it
         └── components/
             ├── TopBar.tsx       # Back-to-menu + mode label + theme toggle + view actions
+            ├── AccountMenu.tsx  # Sign-in link / signed-in account menu (top bar)
             ├── BoardView.tsx    # The table scene: composes everything below in one SVG
             ├── InteractionOverlay.tsx # Legal-placement markers / hover ghosts / robber tiles
             ├── BoardPopover.tsx # Anchored action chooser (confirm + cost / victim pick)
             ├── ChoicePopover.tsx # Bottom-panel resource picker (monopoly / plenty)
             ├── MaritimePopover.tsx # Bank-pile picker: which resource to give + the rate
+            ├── TradePopover.tsx # Compose a 1:1 player trade offer
+            ├── TradeResponsePopover.tsx # Accept / Reject card for an incoming offer
+            ├── Anchored.tsx     # Floating-UI positioning wrapper the popovers share
+            ├── Modal.tsx        # Focus-trapped modal dialog (Radix)
+            ├── GameOverScreen.tsx # End-of-game overlay: winner + final standings
+            ├── MyGames.tsx      # The signed-in user's live games list
+            ├── AdminLink.tsx    # Superuser-only corner link to /admin
             ├── Hand.tsx         # The acting human's chips (resources, dev cards; clickable)
             ├── CountBadge.tsx   # Cream count badge for chip corners (matches CardPile's token)
             ├── CardPile.tsx     # Top-down card pile + count token (bank, player decks)
@@ -427,8 +459,11 @@ packages/settlrl-app/
             ├── PlayersPanel.tsx # Seat list atop the chat column (stats + belief inspect)
             ├── ChatPanel.tsx    # Right-hand column: players section + chat / log
             ├── ThemeToggle.tsx  # Light / dark switch
+            ├── SoundToggle.tsx  # Mute / unmute the action sounds
+            ├── icons.tsx        # Monochrome line icons (currentColor, theme-following)
             ├── HexTile.tsx      # Hex polygon, terrain colour, icon-and-number token
             ├── TerrainIcon.tsx  # Per-terrain silhouette motif (pine, sheep, …)
+            ├── ResourceGlyph.tsx # A resource's terrain motif as a standalone inline glyph
             ├── Road.tsx         # Player road along an edge
             ├── Building.tsx     # Settlement / city on a vertex
             ├── Robber.tsx       # Robber pawn on a tile
