@@ -7,19 +7,12 @@ implements (the canonical source rules, kept as the external spec for rule
 fidelity):
 https://www.catan.com/sites/default/files/2021-06/catan_base_rules_2020_200707.pdf
 
-## Documentation
+## Development guidelines
 
-When you change code, check whether the relevant module-level docs (per-package `CLAUDE.md`) and READMEs still describe it accurately, and update them in the same change. Remove references that have gone stale.
+Reviews check changes against this section explicitly — point reviewer agents
+here and have them verify each guideline, not just correctness.
 
-**Code and types are documentation.** Never repeat in prose what a signature, type annotation, or name already states — if something is clearly understandable by reading the code, don't document it. Docs record only what code cannot express: invariants, design rationale, cross-module contracts, perf evidence, gotchas.
-
-Array parameters and returns carry jaxtyping annotations. Reuse the shared alias — defined beside the constants that pin its dimensions — instead of bare `jax.Array` or a local redefinition; bare `jax.Array` is for the rare genuinely shape/dtype-polymorphic case. The test conftests turn these annotations into enforced runtime checks for the hooked modules, so they must be exact, not aspirational.
-
-Keep docs concise. User-facing docs (READMEs) describe the **current structure** of the code — what each part is and how to use it — and nothing else. They are not a journal: no history or chronology, no "what we haven't done yet" / future work, no technical reasoning, hypotheses, or evidence (those belong in `CLAUDE.md`, which cites experiment numbers, or are omitted). Each section explains one thing, and explains it clearly. Keep abstractions clear and leave implementation details out.
-
-Comments should be concise. Doc comments (docstrings) describe only the contract to callers — behavior not evident from the signature; no implementation detail, design motivation, or perf notes (those belong in the per-package `CLAUDE.md`, or are simply omitted).
-
-## Conventions
+### Naming and abstractions
 
 - **Naming.** A name must read correctly at the call site without the
   context that defined it — spell out domain words instead of abbreviating.
@@ -27,6 +20,29 @@ Comments should be concise. Doc comments (docstrings) describe only the contract
   to explain its role, rename it instead.
 - **No speculative generality.** Build an abstraction when its second
   consumer exists, not before. No dummy/placeholder configs, no dead code.
+
+### Documentation
+
+When you change code, check whether the relevant module-level docs (per-package `CLAUDE.md`) and READMEs still describe it accurately, and update them in the same change. Remove references that have gone stale.
+
+**Code and types are documentation.** Never repeat in prose what a signature, type annotation, or name already states — if something is clearly understandable by reading the code, don't document it. Docs record only what code cannot express: invariants, design rationale, cross-module contracts, perf evidence, gotchas.
+
+**Present tense only — no "was X, now Y".** Docs and comments describe the current state; never narrate past states, migrations, renames, superseded decisions, or comparisons to deleted code. History lives in git and `experiments/JOURNAL.md`. A comment that explains a change to a reviewer rather than a constraint to the next reader gets deleted, not merged.
+
+Keep docs concise. User-facing docs (READMEs) describe the **current structure** of the code — what each part is and how to use it — and nothing else. They are not a journal: no history or chronology, no "what we haven't done yet" / future work, no technical reasoning, hypotheses, or evidence (those belong in `CLAUDE.md`, which cites experiment numbers, or are omitted). Each section explains one thing, and explains it clearly. Keep abstractions clear and leave implementation details out.
+
+Comments should be concise. Doc comments (docstrings) describe only the contract to callers — behavior not evident from the signature; no implementation detail, design motivation, or perf notes (those belong in the per-package `CLAUDE.md`, or are simply omitted).
+
+Array parameters and returns carry jaxtyping annotations. Reuse the shared alias — defined beside the constants that pin its dimensions — instead of bare `jax.Array` or a local redefinition; bare `jax.Array` is for the rare genuinely shape/dtype-polymorphic case. The test conftests turn these annotations into enforced runtime checks for the hooked modules, so they must be exact, not aspirational.
+
+### Tests
+
+- **Budgets stay small.** Run the minimum batch/iterations/repeats that
+  proves the property; the experiments suite fits 2–3 minutes cold. Delete
+  shape-echo and tautology tests on sight.
+- **Test the protocol, not internals.** Policies and agents get contract
+  tests through their registries (`POLICIES`, preset dicts); no bespoke
+  tests of private logic that a contract test already pins.
 
 ## Experiments
 
