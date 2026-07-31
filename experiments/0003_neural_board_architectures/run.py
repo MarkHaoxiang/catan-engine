@@ -27,7 +27,7 @@ from settlrl_learn.nn.architectures import make_model
 from train import TASK_FIELDS, select_metric, train
 
 ARCHS = ("mlp_engineered", "mlp_flat", "deepset", "gnn")
-# The GraphNet ablation: the engineered baseline + legacy gnn + one preset per
+# The GraphNet ablation: the engineered baseline + `gnn` + one preset per
 # lever (settlrl_learn.nn.graphnet.PRESETS), so each row isolates one design choice.
 ABLATION = (
     "mlp_engineered", "gnn", "gn_base", "gn_multi", "gn_norm",

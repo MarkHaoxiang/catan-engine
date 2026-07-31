@@ -8,6 +8,5 @@ opponents: [lookahead, random]
 anchor_elos:
   lookahead: 0.0
   # calibrated 2026-07-29 (experiments/0001_bench_smoke calibrate, joint MLE
-  # over random/greedy/lookahead/mcts/az0, n=4238 total; see JOURNAL.md). Was
-  # -800.0 -- every historical arena_elo value shifts scale accordingly.
+  # over random/greedy/lookahead/mcts/az0, n=4238 total; see JOURNAL.md).
   random: -1115.0

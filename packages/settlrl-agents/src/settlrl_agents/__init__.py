@@ -53,9 +53,10 @@ POLICIES: dict[str, OpponentSpec] = {
         _ANY_COUNT,
         defaults={"value": heuristic_value, "num_simulations": 0, "propose_rate": 0.5},
     ),
-    # The re-determinizing SO-ISMCTS search (true per-simulation legality, mctx's
-    # Gumbel-MuZero selection on a custom tree — see search/ismcts.py). The "mcts"
-    # name is kept for bench/render/service string continuity.
+    # The re-determinizing SO-ISMCTS search (true per-simulation legality,
+    # Gumbel-MuZero selection (Danihelka et al. 2022) on a custom tree — see
+    # settlrl_search.ismcts). The "mcts" name is kept for bench/app/service
+    # string continuity.
     "mcts": BeliefSpec(
         make_search,
         _ANY_COUNT,

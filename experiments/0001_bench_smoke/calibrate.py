@@ -37,7 +37,7 @@ AZ0_NAME = "az0_gnn96x4"
 FIXED_ELOS: dict[str, float] = {"lookahead": 0.0}
 """The scale's origin: ``anchored_elo``'s convention (heuristic lookahead = 0)."""
 
-# Budgets (task brief): heuristic-vs-heuristic pairs are cheap (n>=600); a pair
+# Budgets: heuristic-vs-heuristic pairs are cheap (n>=600); a pair
 # touching mcts or az0 pays search cost (n=300-400).
 PAIR_PLAN: list[tuple[str, str, int]] = [
     ("random", "greedy", 600),

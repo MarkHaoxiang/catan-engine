@@ -1,8 +1,8 @@
 games: 128          # ~= the eval batch (the evaluator overshoots to ~batch anyway)
-every: 10           # arena was ~297s (lookahead+random); the az0 rung below adds
-                    # one more lookahead-grade match every round (same batch/sims),
-                    # roughly doubling that to ~590s; every 10 still keeps eval a
-                    # bounded slice of wall-clock
+every: 10           # three net rungs (az0/az1/az2, each every:1) make a full arena
+                    # round several lookahead-grade matches; production presets
+                    # override cadence to games=64/every=150 (~10% wall-share).
+                    # Retuning this base cadence is gpu-day-checklist item 7.
 batch: 128
 sims: 24
 considered: 16
@@ -10,15 +10,13 @@ opponents: [lookahead, random]
 anchor_elos:
   lookahead: 0.0
   # calibrated 2026-07-29 (experiments/0001_bench_smoke calibrate, joint MLE
-  # over random/greedy/lookahead/mcts/az0, n=4238 total; see JOURNAL.md). Was
-  # -800.0 -- every historical arena_elo value shifts scale accordingly.
+  # over random/greedy/lookahead/mcts/az0, n=4238 total; see JOURNAL.md).
   random: -1115.0
 opponent_every:
   random: 5         # random has been 1.0 from iter ~9 on -- sample it, not every round
 net_opponents:
   # the frozen az0 checkpoint as a mid-rung between random and lookahead.
-  # elo calibrated 2026-07-29 (was the provisional -100.0 from its 0.361 vs
-  # lookahead alone; see JOURNAL.md).
+  # elo calibrated 2026-07-29, see JOURNAL.md.
   az0_gnn96x4:
     elo: -58.0
     every: 1

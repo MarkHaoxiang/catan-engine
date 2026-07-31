@@ -18,9 +18,8 @@ This module exposes:
 - ``assert_legality_match`` -- engine flat legality vs reference ``is_legal``,
   row for row over the whole flat table.
 - thin oracle wrappers (``distance_rule_ok``, ``longest_road_length``,
-  ``port_ratio``, ``recompute_longest_road``, ...) preserving the names the old
-  ``tests/reference.py`` exposed, so the existing differential tests only swap
-  their import. Each converts then delegates to the reference.
+  ``port_ratio``, ``recompute_longest_road``, ...) used by the differential
+  tests. Each converts then delegates to the reference.
 """
 
 from __future__ import annotations
@@ -269,7 +268,7 @@ def state_to_game(state: BoardState, b: int = 0) -> ref.Game:
 
 
 # ===========================================================================
-# Oracle wrappers (the old tests/reference.py surface, via the reference)
+# Oracle wrappers (convert, then delegate to the reference)
 # ===========================================================================
 
 

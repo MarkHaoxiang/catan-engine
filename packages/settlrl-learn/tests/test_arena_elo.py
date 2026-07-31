@@ -39,7 +39,7 @@ def test_run_arena_uses_real_counts_for_elo_and_reports_se(monkeypatch: Any) -> 
     nominal_inputs = [
         (0.0, 0.6 * 40, 40),
         (-1115.0, 0.5 * 40, 40),
-    ]  # the old, buggy feed
+    ]  # the nominal (games-requested x winrate) feed -- run_arena must not use it
     assert metrics["arena_winrate"] == results["lookahead"].winrate
     assert metrics["arena_elo"] == anchored_elo(real_inputs)
     assert metrics["arena_elo"] != anchored_elo(nominal_inputs)
@@ -98,7 +98,7 @@ def test_arena_name_path_delegates_to_the_spec_core(monkeypatch: Any) -> None:
         return ArenaResult(wins=1.0, episodes=2)
 
     # by module object: the training package rebinds `arena` to the function, so
-    # the dotted path no longer reaches the submodule.
+    # the dotted path does not reach the submodule.
     arena_module = sys.modules["settlrl_learn.training.arena"]
     monkeypatch.setattr(arena_module, "arena_spec", _fake_spec_arena)
     res = arena(

@@ -9,7 +9,7 @@ package (the hook only exists in the test session).
 
 The hook must be installed before the target modules are first imported, so this
 lives in the top-level ``tests`` conftest, which pytest loads before any test
-module (and before ``tests/actions/conftest.py``).
+module (and before ``tests/mechanics/actions/conftest.py``).
 
 ``action`` / ``env`` are intentionally excluded: their cores are annotated with
 *batched* aliases but execute unbatched under ``vmap``, so enforcing them needs a

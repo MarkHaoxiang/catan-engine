@@ -1,6 +1,6 @@
 """The fixed-capacity tree storage and the selection/expand/backup helpers.
 
-Memory pass: ``children`` / ``n`` / ``mover`` / ``kind`` hold only small exact
+``children`` / ``n`` / ``mover`` / ``kind`` hold only small exact
 integers, so they are stored in narrow dtypes (see :mod:`config`) and cast to
 float at the read sites where arithmetic needs it. The stored values are exact
 integers, so results are bit-identical to a float32/int32 store.

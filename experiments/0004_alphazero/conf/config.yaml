@@ -1,6 +1,5 @@
 # AlphaZero 2p Catan — composed config groups, validated into AlphaZeroConfig.
-# Defaults reproduce the former flat "default" variant; conf/experiment/*.yaml
-# reproduce the former VARIANTS (select with +experiment=<name>).
+# Presets live in conf/experiment/*.yaml (select with +experiment=<name>).
 defaults:
   - net: mlp
   - search: default
@@ -18,7 +17,6 @@ mode: train
 n_iterations: 20
 checkpoint_every: 5
 resume_from: ""
-gate_winrate: 0.55
 gate_elo: 35.0
 final_games: 400
 

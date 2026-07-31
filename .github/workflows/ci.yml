@@ -51,8 +51,8 @@ jobs:
       # checks (seconds) plus one tiny end-to-end run per framework. `-n 2`
       # pins xdist to one JAX process per physical runner core (~4GB peak
       # each) rather than letting `auto` vary with the runner. The timeout is
-      # ~4x the observed cold-cache cost (~2 min): a smoke that regresses into
-      # a runaway budget fails here instead of eating the job's whole hour.
+      # well above the observed ~2 min cold-cache cost: a smoke that regresses
+      # into a runaway budget fails here instead of eating the job's whole hour.
       - run: WANDB_MODE=disabled uv run pytest experiments/tests -n 2
         timeout-minutes: 10
 

@@ -344,7 +344,7 @@ class GraphNet(eqx.Module):
 
 
 # Named presets: ``gn_base`` is plain message passing + mean readout (the closest
-# to the legacy ``gnn``); each other flips one lever, plus a stacked ``full``.
+# to the ``gnn`` architecture); each other flips one lever, plus a stacked ``full``.
 # Experiment 0003's ablation recommends ``gn_global`` as the value+policy net:
 # the robust all-rounder across local/global/structural targets. Attention
 # (``gn_gat``) leads on the global win target but is catastrophic on structural

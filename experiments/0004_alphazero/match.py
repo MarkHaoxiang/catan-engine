@@ -1,12 +1,10 @@
 """Checkpoint-vs-checkpoint match CLI: a paired, seat-swapped head-to-head
 between two GNN net refs, at one shared search budget.
 
-The named gap in ``docs/superpowers/gpu-day-checklist.md`` item 5 (the
-four-arm study's actual verdict mechanism) -- no CLI played a checkpoint
-against another checkpoint outside a training run's own arena. This is a lab
-tool, not a product: it reuses ``settlrl_learn.training.arena.arena_spec``
-(the loop's own seat-swapped-pair mechanics) and ``settlrl_agents.evaluate``
-underneath it, no new match machinery.
+A lab tool, not a product: it reuses
+``settlrl_learn.training.arena.arena_spec`` (the loop's own seat-swapped-pair
+mechanics) and ``settlrl_agents.evaluate`` underneath it, no new match
+machinery.
 
 A net ref is either:
 

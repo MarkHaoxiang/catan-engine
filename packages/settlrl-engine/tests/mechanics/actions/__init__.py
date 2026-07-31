@@ -10,9 +10,9 @@ unchanged. Success boards come from the ``*_board`` pytest fixtures in
 
 All 15 actions are vectorized in ``action.py`` and covered here (one file per
 action). DomesticTrade is intentionally deferred (never implemented). The trusted
-single-game oracle is the standalone ``settlrl-reference`` package, bridged to the
-engine by ``tests/conversion.py`` (the differential reference for
-``tests/test_rules.py`` and ``tests/test_reference_equivalence.py``).
+single-game oracle is ``settlrl_game.reference`` (inside settlrl-game), bridged to
+the engine by ``tests/conversion.py`` (the differential reference for
+``tests/mechanics/test_rules.py`` and ``tests/test_reference_equivalence.py``).
 ``ActionResult`` lives in ``action.py``, and ``settlrl_engine.env`` exposes a
-unified ``step`` / ``available`` over this action set (see ``tests/test_env.py``).
+unified ``step`` / ``available`` over this action set (see ``tests/env/test_env.py``).
 """

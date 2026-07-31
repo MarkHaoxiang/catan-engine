@@ -26,8 +26,9 @@ def test_parity_vs_anchor_is_the_anchor_rating() -> None:
         assert abs(r - anchor) < 1e-3
 
 
-def test_gate_winrate_maps_to_known_margin() -> None:
-    # vs the heuristic pinned at 0, the 0.55 gate is +~35 Elo; 0.45 is the mirror.
+def test_55_percent_winrate_maps_to_35_elo() -> None:
+    # vs the heuristic pinned at 0, 55% winrate is +~35 Elo (this derives the
+    # gate_elo threshold); 45% is the mirror.
     up = anchored_elo([(0.0, 110, 200)])
     down = anchored_elo([(0.0, 90, 200)])
     assert math.isclose(up, 400 * math.log10(0.55 / 0.45), abs_tol=0.5)

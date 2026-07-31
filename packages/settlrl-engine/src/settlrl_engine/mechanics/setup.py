@@ -59,7 +59,7 @@ def grant_setup_resources(
     resource = layout.tile_resource.astype(jnp.int32)  # (N_TILES,)
     produce = (incident & (layout.tile_resource != Tile.DESERT)).astype(jnp.int32)
     # Scatter demand per resource, then grant what the bank can cover (granting
-    # min(demand, bank) matches the old per-tile sequential payout).
+    # min(demand, bank) matches a per-tile sequential payout).
     demand = jnp.zeros((N_RESOURCES,), jnp.int32).at[resource].add(produce)
     res = res.at[player].add(jnp.minimum(demand, bank))
     return state._replace(player_resources=res.astype(jnp.uint8))

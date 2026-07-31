@@ -8,9 +8,7 @@ per-determinization legality property -- the search only ever returns an action
 legal in the true position -- is what the legality/support tests pin (an illegal
 return would mean the descent leaked an action illegal under the real board).
 
-Strength vs. the previous mctx search is a *match*, not a unit test (the
-search/ismcts.py port reached parity); see the comparison harness, gated at n
-the SE can support.
+Strength is settled by matches, not unit tests.
 """
 
 from __future__ import annotations

@@ -101,7 +101,6 @@ class AlphaZeroConfig(Config):
     n_iterations: int = 20
     checkpoint_every: int = 5
     resume_from: str = ""  # prior run dir to continue bit-exactly (its runstate.eqx)
-    gate_winrate: float = 0.55  # legacy gate vs lookahead; reported, no longer gates
     gate_elo: float = 35.0  # pass iff gauntlet's arena_elo - 2*arena_elo_se clears this
     final_games: int = 400  # games/rung in the end-of-run gauntlet (vs arena.games)
     net: NetConfig = Field(default_factory=NetConfig)
@@ -220,7 +219,7 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     verdict = gauntlet_verdict(metrics, cfg.gate_elo)
     run.finish(
         verdict, best_arena_winrate=best,
-        gate_elo=cfg.gate_elo, gate_winrate=cfg.gate_winrate, **metrics,
+        gate_elo=cfg.gate_elo, **metrics,
     )  # fmt: skip
 
 
@@ -285,7 +284,7 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     verdict = gauntlet_verdict(metrics, cfg.gate_elo)
     run.finish(
         verdict, best_arena_winrate=best,
-        gate_elo=cfg.gate_elo, gate_winrate=cfg.gate_winrate, **metrics,
+        gate_elo=cfg.gate_elo, **metrics,
     )  # fmt: skip
 
 

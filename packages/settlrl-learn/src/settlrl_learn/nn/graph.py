@@ -315,9 +315,9 @@ def _global_features(
     per_player = jnp.stack([vps, hands, devs, knights, roads])  # (5, P)
 
     # Own values, then a symmetric summary of the opponent *multiset* (sum, max,
-    # spread) per quantity: invariant to relabeling the opponents, and -- unlike
-    # the old (max-VP, total-hand) pair -- it distinguishes "one strong + one
-    # weak" from "two medium" opponents, and adds their dev/knight/road context.
+    # spread) per quantity: invariant to relabeling the opponents, and it
+    # distinguishes "one strong + one weak" from "two medium" opponents, and
+    # adds their dev/knight/road context.
     opp = players != p
     own = per_player[:, p]
     opp_sum = jnp.sum(jnp.where(opp, per_player, 0.0), axis=1)

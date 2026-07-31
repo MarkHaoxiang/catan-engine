@@ -1,4 +1,4 @@
-"""TDD for the anchor-calibration joint Elo fit (measurement wave 2, task 4).
+"""The anchor-calibration joint Elo fit.
 
 Pure-Python: no JAX, no GPU. Synthetic win matrices are built at the *exact*
 expected score for known Elos -- what an infinite-sample round-robin converges

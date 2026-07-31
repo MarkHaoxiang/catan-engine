@@ -2,9 +2,7 @@
 
 The frozen-checkpoint arena rungs (``build_net_opponents``), the end-of-run
 verdict gauntlet (``run_final_gauntlet`` / ``gauntlet_verdict``), and the
-throughput-bench mode (``BenchConfig`` / ``run_bench``) -- split out of
-``run.py`` so that file keeps only the config schema, the two training run
-paths, and ``main``.
+throughput-bench mode (``BenchConfig`` / ``run_bench``).
 """
 
 from __future__ import annotations
@@ -83,19 +81,18 @@ def run_final_gauntlet(
     per-round schedule neutralized so nothing is skipped (``opponent_every={}``,
     every net opponent's ``every`` forced to 1). With every schedule's period 1,
     ``round_index % 1 == 0`` unconditionally, so ``round_index`` plays no role;
-    0 is passed for clarity. Seeded off ``cfg.seed + 99`` -- the legacy final-arena
-    base -- so the gauntlet's games stay disjoint from the in-loop training arenas.
+    0 is passed for clarity. Seeded off ``cfg.seed + 99`` so the gauntlet's games
+    stay disjoint from the in-loop training arenas.
 
     Drops jax's compilation caches first, so no compiled program a caller built
     before this call survives it."""
     # memory: the training loop's compiled programs (self-play at B=512, the
     # optimiser step, the in-loop arenas) stay loaded on the device via jax's jit
     # caches long after `learn` returned, and the gauntlet then compiles its own
-    # (one per rung, plus two net-opponent searches). A 2026-07-30 v2_base run
-    # died right here on CUDA_ERROR_OUT_OF_MEMORY loading a gauntlet module. The
-    # clear costs a recompile and frees them; the collect drops the training
-    # arrays reachable only through cycles. Neither returns pool memory to the
-    # driver -- if a foreign process is sharing the GPU, launch with
+    # (one per rung, plus two net-opponent searches). The clear costs a recompile
+    # and frees them; the collect drops the training arrays reachable only
+    # through cycles. Neither returns pool memory to the driver -- if a foreign
+    # process is sharing the GPU, launch with
     # XLA_PYTHON_CLIENT_PREALLOCATE=false as well.
     jax.clear_caches()  # type: ignore[no-untyped-call]
     gc.collect()

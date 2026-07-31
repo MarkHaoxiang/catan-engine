@@ -12,10 +12,10 @@ from typing import Any
 
 ANCHOR_DIR = Path(__file__).parent / "anchors"
 
-# az0_gnn96x4's -58 Elo (JOURNAL.md's 2026-07-29 scale-reset entry) was fit
-# playing the checkpoint's setup phase at GNNBackend's own defaults -- a frozen
-# anchor must keep frozen semantics, so every caller pins these values rather
-# than reading a run's cfg.net.setup_* (which varies per run/sweep). Shared by
+# The setup semantics az0_gnn96x4's -58 Elo (JOURNAL.md's 2026-07-29
+# scale-reset entry) was calibrated under -- a frozen anchor must keep frozen
+# semantics, so every caller pins these values rather than reading a run's
+# cfg.net.setup_* (which varies per run/sweep). Shared by
 # 0004_alphazero/run.py (arena_helpers.build_net_opponents) and
 # 0001_bench_smoke/calibrate.py (az0_spec), which fit this checkpoint's Elo.
 NET_OPPONENT_SETUP_DEPTH = 1

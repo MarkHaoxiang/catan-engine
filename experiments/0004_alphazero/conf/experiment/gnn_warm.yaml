@@ -1,6 +1,6 @@
 # @package _global_
 # Warm-started: the first teacher.iters iters learn from a fixed strong
-# heuristic search (the cold-start fix), then self-play takes over.
+# heuristic search, then self-play takes over.
 defaults:
   - override /net: gnn
   - override /teacher: heuristic

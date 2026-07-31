@@ -10,7 +10,7 @@ defaults:
 net:
   width: 96
   layers: 4
-# scale2_long: the first long run on the new infra -- scale2's shape (persistent
+# scale2_long: scale2's shape (persistent
 # self-play, opening-temperature anneal, PCR) stretched to ~2500 iterations
 # (~14-16h with eval/arena overhead). Measured: self-play+train ~= 18-22s/iter at
 # scale2 (922 samples/s, 16384 samples/iter); the in-loop arena at
@@ -37,8 +37,7 @@ replay:
   buffer_max: 200000
 eval:
   every: 10   # cheap (forward pass over <=2048 samples); at 2500 iters this
-              # fires 250 times -- unlike the validation run, where every=10 >
-              # its 8 iterations meant eval never fired at all.
+              # fires 250 times.
   samples: 2048
 arena:
   games: 64

@@ -110,8 +110,7 @@ def test_0004_experiment_presets_compose() -> None:
 
 
 def test_0004_v2_four_arm_study_presets_compose() -> None:
-    # The featurization-v2 four-arm study (docs/superpowers/plans/
-    # 2026-07-30-featurization-v2.md, Task 5): each arm changes exactly one
+    # The featurization-v2 four-arm study: each arm changes exactly one
     # net knob on top of v2_base (net.incidence / net.layers / net.preset).
     # Two things are checked: each arm's own delta (below), and -- the
     # isolation guarantee -- that popping just those three known-varying

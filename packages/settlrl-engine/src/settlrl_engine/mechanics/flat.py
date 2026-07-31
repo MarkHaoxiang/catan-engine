@@ -348,8 +348,8 @@ type_mask_from_flat: Callable[[FlatMaskArray], TypeMaskArray] = jax.jit(_type_ma
 # A finer view over the same cores than the flat sweep: ``INDEX_MASKS`` sweeps an
 # index-parameterized action's whole primary domain (the env's
 # ``available_indices``). The per-action-type "is any move of this type legal"
-# mask (the env's ``action_mask``) is no longer a separate sweep -- the env
-# reduces it straight from the cached flat-legality mask.
+# mask (the env's ``action_mask``) is not a separate sweep: the env reduces it
+# from the cached flat-legality mask.
 # ===========================================================================
 
 # Static parameter domains for the robber-tile legality sweep.

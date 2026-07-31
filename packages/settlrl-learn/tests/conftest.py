@@ -7,7 +7,7 @@ import pathlib
 import jax
 from jaxtyping import install_import_hook
 
-# model.py / train.py are excluded: MLPParams' per-layer shapes are
+# nn/mlp.py / train.py are excluded: MLPParams' per-layer shapes are
 # heterogeneous, and jaxtyping unifies dim names across a variadic tuple, so
 # the annotation is per-layer documentation that cannot hold globally.
 install_import_hook(
