@@ -26,7 +26,7 @@ class of related experiments sharing machinery — committed; everything a run
 
 ## Configuration
 
-A framework's config is a typed `settlrl_agents.experiment.Config` (pydantic)
+A framework's config is a typed `settlrl_learn.experiment.Config` (pydantic)
 schema — the defaults live in the schema, named *variants* are deltas onto them,
 and `key=value` arguments on the command line override either (OmegaConf
 dotlist: `maximise.iterations=1`). `Config.resolve(base, variant, overrides)`

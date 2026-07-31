@@ -9,8 +9,8 @@ file.
 
 **Closed, not on this list**: the fused-leaf seam-fix confirmation
 (`search_step_ms` / `bench_throughput` before-vs-after) already ran and
-resolved GPU-neutral — `.superpowers/sdd/gnn-optimization-notes.md`
-("2026-07-30 — GPU confirmation") and `experiments/JOURNAL.md`. Don't re-run
+resolved GPU-neutral — `experiments/JOURNAL.md` (the seam-fix GPU-neutral
+entry). Don't re-run
 it; a regression there would show up as a `bench_throughput` gate failure on
 any other item below and should be investigated as a regression, not
 re-litigated as this checklist item.
@@ -97,41 +97,25 @@ the sweep's arithmetic against the **confirmed ~15%** share, not the
 15%-share pricing, still leaves total iteration wall-clock within the
 `scale2`-derived budget the study presets inherit. Otherwise 96 stays.
 
-## 5. Four-arm study head-to-heads (400 games paired, per arm vs v2_base)
+## 5. Four-arm study: paired vs-v2_base head-to-heads (optional follow-up)
 
-Train each arm to a checkpoint:
+All four arms (`v2_base`, `v2_incidence`, `v2_deep`, `v2_hetero`) trained
+and were judged by independent 400-game final gauntlets against the shared
+anchor set (`experiments/JOURNAL.md`, 2026-07-30 entry: `v2_hetero` won,
++76 ± 10 over `v2_base`, sole gate pass). That gauntlet verdict stands;
+`v2_incidence`'s config comment records the interpretation note for its
+underperformance (the slot-rank input geometry, not a verdict on per-tile
+identity).
 
-```bash
-uv run python experiments/0004_alphazero/run.py +experiment=v2_base
-uv run python experiments/0004_alphazero/run.py +experiment=v2_incidence
-uv run python experiments/0004_alphazero/run.py +experiment=v2_deep
-uv run python experiments/0004_alphazero/run.py +experiment=v2_hetero
-```
-
-Then, per arm (`v2_incidence`, `v2_deep`, `v2_hetero`), a **paired**
-400-game head-to-head against `v2_base`'s checkpoint: same seed for both
-sides (the repo's established paired-seed doctrine —
-`packages/settlrl-learn/CLAUDE.md`'s arena-seed-fixed-across-iterations
-rationale), seat-swapped. Load each side via the anchor machinery
-(`experiments/0004_alphazero/anchors.py::load_anchor`) and pit them through
-`arena_spec`/`build_net_opponents` rather than either side's own search
-config alone, so both play under the same search budget.
-
-**Decision:** this is the study's actual verdict mechanism — it settles
-whether each lever (per-tile identity, +2 layers, hex message-passing) beats
-`v2_base` outright. `v2_incidence`'s config comment already records the
-interpretation note if it underperforms (the slot-rank input geometry, not a
-verdict on per-tile identity). Record win rates + Elo deltas + n=400 in
-`experiments/0004_alphazero/report.md`, one section per arm, before drawing
-any strength conclusion (repo doctrine: strength claims gate through a
-recorded match, never a reading of it).
-
-No CLI runs a checkpoint-vs-checkpoint match today — `build_net_opponents`/
-`run_final_gauntlet` only play a net against `POLICIES` names or other
-`net_opponents` *inside* a training run's own arena. The paired-match verdict
-step needs a small script beside `anchors.py` (load two checkpoints via
-`load_anchor`, build both `play_agent` specs, drive them through
-`arena_spec` directly) before this item is runnable.
+What remains optional: **paired** per-arm head-to-heads directly against
+`v2_base`'s checkpoint — same seeds both sides, seat-swapped
+(`packages/settlrl-learn/CLAUDE.md`'s paired-seed doctrine) — as a
+variance-cut confirmation of the gauntlet deltas. The tooling exists:
+`experiments/0004_alphazero/match.py` runs checkpoint-vs-checkpoint matches
+(loading via `anchors.py::load_anchor`, both sides under the same search
+budget). Run it only if a gauntlet delta needs a tighter error bar; record
+any result in `experiments/0004_alphazero/report.md` per repo doctrine
+(strength claims gate through a recorded match).
 
 ## 6. 512-vs-1024 batch re-measurement (the sample-yield wobble note)
 
@@ -141,7 +125,7 @@ uv run python experiments/0004_alphazero/run.py +experiment=bench_throughput sel
 ```
 
 The original persistent-batch sweep (`experiments/JOURNAL.md`, 2026-07-28)
-picked 512 over 1024 (896.60 vs 834.76 samples/s). `training/bench.py`'s own
+picked 512 over 1024 (922.53 vs 834.76 samples/s). `training/bench.py`'s own
 docstring notes that under `persistent`, repeats are **sequential
 continuations of one pool**, not repetitions of an identical workload — so a
 single sweep's samples/s carries pool-phase noise (the "sample-yield wobble")

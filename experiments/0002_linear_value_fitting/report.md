@@ -15,7 +15,7 @@ the pipeline generalizes to any feature subset.
 
 `uv run python experiments/0002_linear_value_fitting/run.py [predict|maximise]`
 — config at the top of run.py; the shared machinery is
-`experiments/_value_fitting.py` (the predict numbers below predate the
+`experiments/0002_linear_value_fitting/value_fitting.py` (the predict numbers below predate the
 framework extraction, same logic; the maximise run originally lived as
 experiment 0003 before the targets merged). Collect ~190k positions (3,150 episodes, B=64)
 from lookahead(heuristic) vs greedy; rows are seat-0-minus-seat-1

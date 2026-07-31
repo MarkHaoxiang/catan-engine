@@ -4,6 +4,9 @@ site_url: https://www.markhaoxiang.com/settlrl-engine/
 repo_url: https://github.com/MarkHaoxiang/settlrl-engine
 docs_dir: docs
 use_directory_urls: true
+# Internal working notes live under docs/superpowers/; keep them off the public site.
+exclude_docs: |
+  superpowers/
 
 theme:
   name: material

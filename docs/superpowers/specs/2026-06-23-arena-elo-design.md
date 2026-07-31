@@ -36,7 +36,8 @@ lc0 / OpenSpiel / canopy (see the conversation log). Conclusions used here:
   drive R to ±∞. Pure, unit-tested (`tests/test_elo.py`: parity→anchor,
   gate 0.55→+35, monotone, saturated-finite, symmetric).
 - `ArenaConfig.anchor_elos: dict[str,float]` (default `{lookahead: 0, random:
-  -800}`) — the frozen Elo scale; `lookahead`(heuristic) pinned at 0 so
+  -1115.0}` — recalibrated 2026-07-29; see `conf/arena/default.yaml`) — the
+  frozen Elo scale; `lookahead`(heuristic) pinned at 0 so
   `arena_elo` reads directly as the net's margin over the Stage-1 gate.
 - `steps.run_arena` now also returns `arena_elo`, computed from the per-anchor
   win-rates via `anchored_elo`.
@@ -51,13 +52,12 @@ The per-iteration `val_*` / `policy_*` / `value_*` metrics from
 arena rounds (the canopy-style net-vs-search agreement / value-calibration
 signal), so no new proxy plumbing this round.
 
+- **Frozen self-play checkpoint anchors** — implemented since: `net_opponents`
+  lets the arena take frozen checkpoints as anchors, and the ladder now carries
+  rungs az0/az1/az2, each snapshotted at a fixed rating.
+
 ## Deferred
 
-- **Frozen self-play checkpoint anchors** (the self-improvement signal once we
-  plateau below the heuristic): needs `arena` to accept an arbitrary net/agent as
-  opponent (today it takes a `POLICIES` name). The Elo machinery already accepts
-  extra anchors as `(elo, wins, games)` tuples, so this is an arena-side change
-  only. Snapshot each anchor's rating once and treat it as constant.
 - **openskill ladder for the 3–4p mixed-count arena** (separate from this 2p
   gauntlet number).
 - Canopy's `mean|q − V_net|` "search correction" proxy (needs recorded `q` +

@@ -205,3 +205,7 @@ GraphNorm, no JK**. It is the robust all-rounder: best-or-tied on the global
 net must also read structure, where attention is catastrophic. Single seed on
 `win`/`heuristic` (the ~0.01–0.02 spreads there are within noise); the `road`
 and attention effects are large and replicated.
+
+*Superseded 2026-07-30/31*: the 0004 four-arm study and the az2 gate pass
+showed `gn_hetero` beats `gn_global` in the full AZ loop; `gn_hetero` is the
+adopted trunk (see JOURNAL).

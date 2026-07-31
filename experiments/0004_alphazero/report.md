@@ -1,7 +1,9 @@
 # 0004 — AlphaZero (2-player)
 
 Status: open (Stage-1 gate cleared twice — scale2_long at 2500 iterations,
-`v2_hetero` at 300; long `v2_hetero` run in-flight)
+`v2_hetero` at 300; long `v2_hetero` run COMPLETE 2026-07-31 — final
+400-game gauntlet `arena_elo` 186.759 ± 10.877, 0.7403 vs lookahead,
+0.6014 vs az1, `az2_hetero96x4` minted; see JOURNAL)
 
 ## Hypothesis
 
@@ -24,14 +26,16 @@ and the gate verdict. Each iteration:
 4. **arena** (periodic) — seat-swapped win rate vs `lookahead(heuristic)`.
 
 2-player only: belief is near-exact, so the multiplayer paranoid-frame problem
-never arises. Stack: mctx (search), optax, flashbax, the settlrl-learn net.
+never arises. Stack: settlrl-search's SO-ISMCTS tree (search), optax,
+flashbax, the settlrl-learn net.
 
 ## Results
 
 Smoke (1 iteration, 8 samples, 4 sims) runs the whole loop end-to-end and
 records a verdict. Component PoCs: self-play yields valid policy/value targets
 (395 samples, policy rows sum to 1, balanced wins); training drops the loss
-7.17 → 1.74 over 100 steps. No strength run yet — PoC scope.
+7.17 → 1.74 over 100 steps. At PoC time no strength run had happened yet —
+the strength results below came later.
 
 ### Throughput (2026-07-28)
 
@@ -62,10 +66,9 @@ iteration, losses drop with no NaNs, and policy entropy stays alive
 ## Decision
 
 Loop adopted; `scale2.yaml` is the throughput-wave production preset
-(4.78x self-play throughput over the frozen baseline). Not yet run at
-scale — next is a real `scale2` run against the gate. Parallel-descent
-search work (K-way SH blocks, virtual loss) waits until that run re-tests
-the plateau.
+(4.78x self-play throughput over the frozen baseline). The recipe has since
+run at scale and cleared the Stage-1 gate twice — see the scale2_long and
+four-arm study sections below.
 
 ### scale2_long — first Stage-1 gate clear (2026-07-30)
 
@@ -124,8 +127,11 @@ in-loop reading at the same iteration count (scale2_long @ iter 299, −75.4).
 
 **Caveats / follow-ups**:
 
-- A long `v2_hetero` run (2500 iterations, matching scale2_long's budget) is
-  launched and in-flight: `runs/0004_alphazero/2026-07-31T010419Z`.
+- The long `v2_hetero` run (2500 iterations, matching scale2_long's budget)
+  completed across two segments (`runs/0004_alphazero/2026-07-31T010419Z` +
+  `.../2026-07-31T073531Z`, bit-exact resume at iteration 980). Final
+  400-game gauntlet: `arena_elo` +186.76 ± 10.88; `az2_hetero96x4` minted.
+  Ladder: az0 −58 / az1 +109.86 / az2 +186.76.
 - HNHN degree normalization (the alpha/beta parameterization on the
   vertex↔hex aggregation) is still unimplemented — `v2_hetero` ships with a
   plain segment-sum aggregation. This is a follow-up, not part of this
