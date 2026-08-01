@@ -10,14 +10,12 @@ from settlrl_engine.env import BatchedSettlrlEnv
 from settlrl_learn import (
     FEATURE_DIM,
     features,
-    fit,
     init_prior_params,
     init_value_params,
     load_params,
     make_net_prior,
     make_net_value,
     save_params,
-    value_loss,
 )
 from settlrl_search import make_search
 
@@ -90,23 +88,3 @@ def test_save_load_round_trips(tmp_path: pathlib.Path) -> None:
     for (w, b), (w2, b2) in zip(params, loaded, strict=True):
         assert np.array_equal(np.asarray(w), np.asarray(w2))
         assert np.array_equal(np.asarray(b), np.asarray(b2))
-
-
-def test_fit_reduces_value_loss() -> None:
-    key = jax.random.key(2)
-    x = jax.random.normal(key, (256, FEATURE_DIM))
-    y = (x[:, 0] > 0).astype(jnp.float32)  # separable synthetic labels
-    params = init_value_params(key)
-    before = value_loss(params, x, y)
-    _fitted, after = fit(params, x, y, steps=300, lr=0.05)
-    assert float(after) < float(before) * 0.5
-
-
-def test_fit_runs_under_pytest_budget() -> None:
-    # The smoke above is the contract; this pins the loop's jit reuse (one
-    # compile, then fast steps).
-    key = jax.random.key(3)
-    x = jax.random.normal(key, (32, FEATURE_DIM))
-    y = jnp.zeros((32,))
-    _, loss = fit(init_value_params(key), x, y, steps=5)
-    assert bool(jnp.isfinite(loss))

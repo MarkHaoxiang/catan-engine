@@ -20,8 +20,7 @@ training libraries.
   the search's value + prior seams, and `save_az_params` / `load_az_params` move
   it through `.npz` artifacts.
 - `make_net_value` / `make_net_prior` adapt single-head MLP params onto the
-  seams; `init_value_params` / `init_prior_params` build untrained stand-ins.
-- `fit` / `value_loss` — a minimal full-batch SGD loop (logistic value loss);
+  seams; `init_value_params` / `init_prior_params` build untrained stand-ins;
   `save_params` / `load_params` for `.npz`.
 
 ## Training side

@@ -24,15 +24,12 @@ from settlrl_learn.nn.mlp import (
     save_az_params,
     save_params,
 )
-from settlrl_learn.train import fit, value_loss
-
 __all__ = [
     "FEATURE_DIM",
     "AZParams",
     "MLPParams",
     "az_forward",
     "features",
-    "fit",
     "init_az_params",
     "init_mlp",
     "init_prior_params",
@@ -45,5 +42,4 @@ __all__ = [
     "mlp",
     "save_az_params",
     "save_params",
-    "value_loss",
 ]

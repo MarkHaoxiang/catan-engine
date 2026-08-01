@@ -11,10 +11,6 @@ training loop that produces them.
 
 ::: settlrl_learn.features
 
-## Toy trainer
-
-::: settlrl_learn.train
-
 ## MLP
 
 ::: settlrl_learn.nn.mlp

@@ -18,12 +18,6 @@ uses them.
   shipping. `FEATURE_DIM` is computed at import via `jax.eval_shape` on a
   2-player template (the own/max/mean aggregation makes the width
   player-count invariant, so 2p suffices).
-- `train.py` — full-batch SGD only (the toy fitter); the real loop is the
-  AlphaZero modules below. The value head is a win-probability logit: the
-  searches read leaves as `tanh(v / value_scale) = 2P(win) − 1`, so logistic
-  targets line up with the June 11 calibration finding (P(win) =
-  σ(0.053·v_heuristic)). The AZ net's logit maps in with `value_scale=2`
-  (`tanh(logit/2) = 2P−1`).
 - **Networks live under `nn/`** (training-side, *not* imported by the package
   root — a subprocess guard test, `tests/test_import_light.py`, asserts
   `import settlrl_learn` pulls no equinox/jraph/flashbax/optax/orbax). The
@@ -31,6 +25,10 @@ uses them.
   `nn/__init__`:
   - `nn/mlp.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts
     it onto the search's `value`/`prior` seams). Plain-JAX, root-importable.
+    The value head is a win-probability logit: the searches read leaves as
+    `tanh(v / value_scale) = 2P(win) − 1`, so logistic targets line up with the
+    June 11 calibration finding (P(win) = σ(0.053·v_heuristic)), and the logit
+    maps in with `value_scale=2` (`tanh(logit/2) = 2P−1`).
     Both adapters (`make_az`, `gnn_seams`) return their prior as a
     `settlrl_search.policy.ValuePrior` — a prior that also serves the value off
     the *same* forward. The search evaluates a leaf through it, so one trunk pass
