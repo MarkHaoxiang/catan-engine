@@ -82,8 +82,8 @@ class NetRef(NamedTuple):
 def _scale_defaults() -> SearchSemantics:
     """CLI budget defaults + the shared search semantics, read straight from
     ``conf/arena/scale.yaml`` / ``conf/search/scale.yaml`` (mirrors
-    ``0001_bench_smoke/calibrate.py``'s ``search_semantics``) rather than
-    duplicating the numbers."""
+    ``calibrate.py``'s ``search_semantics``) rather than duplicating the
+    numbers."""
     from omegaconf import OmegaConf
 
     arena = OmegaConf.to_container(OmegaConf.load(_CONF_DIR / "arena" / "scale.yaml"))

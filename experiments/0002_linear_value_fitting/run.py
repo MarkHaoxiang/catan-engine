@@ -117,7 +117,8 @@ VARIANTS: dict[str, dict[str, object]] = {
     # Each `evaluate` retraces a fresh lookahead scan (~40s, cache or not), so
     # cost is the *count* of matches, not their game budgets. `eval_players: []`
     # skips the deployment gate/bench block (3 more matches) -- its seat-swapped
-    # `evaluate`/bench machinery is already smoked by 0001 -- so the verdict
+    # `evaluate`/bench machinery is settlrl-agents library code with its own
+    # test coverage -- so the verdict
     # defaults to "fail" (the smoke asserts only that a verdict was recorded).
     "smoke": {
         "target": "maximise",

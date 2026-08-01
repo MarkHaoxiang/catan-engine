@@ -7,6 +7,6 @@ opponents: [lookahead, random]
 # fixed-Elo anchors for arena_elo (heuristic = the gate at 0). Freeze for a run.
 anchor_elos:
   lookahead: 0.0
-  # calibrated 2026-07-29 (experiments/0001_bench_smoke calibrate, joint MLE
+  # calibrated 2026-07-29 (experiments/0004_alphazero/calibrate.py, joint MLE
   # over random/greedy/lookahead/mcts/az0, n=4238 total; see JOURNAL.md).
   random: -1115.0

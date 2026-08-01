@@ -4,7 +4,7 @@
 
 allocates the next number and creates ``experiments/NNNN_<slug>/`` with
 ``run.py`` and ``report.md`` templates (the contract is in the README;
-``0001_bench_smoke`` is the worked example).
+``0002_linear_value_fitting`` is a worked resolve-based example).
 """
 
 from __future__ import annotations

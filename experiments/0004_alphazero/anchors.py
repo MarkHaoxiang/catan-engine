@@ -16,8 +16,8 @@ ANCHOR_DIR = Path(__file__).parent / "anchors"
 # scale-reset entry) was calibrated under -- a frozen anchor must keep frozen
 # semantics, so every caller pins these values rather than reading a run's
 # cfg.net.setup_* (which varies per run/sweep). Shared by
-# 0004_alphazero/run.py (arena_helpers.build_net_opponents) and
-# 0001_bench_smoke/calibrate.py (az0_spec), which fit this checkpoint's Elo.
+# run.py (arena_helpers.build_net_opponents) and calibrate.py (az0_spec),
+# which fit this checkpoint's Elo.
 NET_OPPONENT_SETUP_DEPTH = 1
 NET_OPPONENT_SETUP_TEMPERATURE = 2.0
 NET_OPPONENT_SETUP_BEAM = 4

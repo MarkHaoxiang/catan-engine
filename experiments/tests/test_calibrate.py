@@ -19,7 +19,7 @@ from settlrl_learn.training.elo import anchored_elo, expected_score
 
 @pytest.fixture
 def calibrate() -> ModuleType:
-    return load_run("0001_bench_smoke", module="calibrate")
+    return load_run("0004_alphazero", module="calibrate")
 
 
 def _synthetic_results(

@@ -347,9 +347,9 @@ uses them.
     + `GNNBackend.play_agent`; the frozen ladder is three rungs — az0 −58 /
     az1 +109.86 / az2 +186.76, all in `experiments/0004_alphazero/anchors/`,
     seated via `net_opponents` in `conf/arena/scale.yaml`. az0's Elo is
-    calibrated by a joint round-robin MLE — 0001_bench_smoke's `calibrate`
-    variant, JOURNAL 2026-07-29; az1/az2's Elos are their own final-gauntlet
-    readings). They're scheduled by their own `every`, reported as
+    calibrated by a joint round-robin MLE —
+    `experiments/0004_alphazero/calibrate.py`, JOURNAL 2026-07-29; az1/az2's
+    Elos are their own final-gauntlet readings). They're scheduled by their own `every`, reported as
     `arena_vs_<name>`, and join the same Elo MLE; their seeds start at `seed +
     steps.NET_OPPONENT_SEED_BASE` (50k — room for five registry opponents), so
     adding one leaves the registry opponents' games bit-identical — a mid-rung

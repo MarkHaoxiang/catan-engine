@@ -25,8 +25,8 @@ No shared libraries live under `experiments/` (only per-framework scripts +
   pydra seam: pydantic is always the validation boundary; `extra="forbid"`, so a
   typo'd knob fails loudly. Heavier frameworks validate at the boundary and pass
   `cfg.dump()` (a plain dict) inward so their internals stay dict-threaded.
-  - **Composition: `resolve` (dict variants) vs hydra config groups.** 0001–0003
-    use `resolve` over an in-`run.py` `VARIANTS` dict. **0004 is the hydra pilot**:
+  - **Composition: `resolve` (dict variants) vs hydra config groups.** 0002 and
+    0003 use `resolve` over an in-`run.py` `VARIANTS` dict. **0004 is the hydra pilot**:
     its `conf/` holds config groups + an `experiment/` preset dir (the former
     `VARIANTS`), composed by `@hydra.main` and validated into the nested
     `AlphaZeroConfig`. hydra's cwd takeover is disabled in `conf/config.yaml` (`hydra.job.chdir: false`,

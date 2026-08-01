@@ -1,6 +1,6 @@
 """Anchor calibration: a joint Elo fit over a round-robin among the shipped
 policy rungs (``random``/``greedy``/``lookahead``/``mcts``) plus the frozen
-``az0_gnn96x4`` checkpoint (0004_alphazero's arena mid-rung).
+``az0_gnn96x4`` checkpoint (this framework's arena mid-rung).
 
 The fit holds ``lookahead`` pinned at 0 -- settlrl-learn's arena scale
 (``anchored_elo`` in ``settlrl_learn.training.elo``) -- and coordinate-ascends
@@ -13,18 +13,27 @@ connected round-robin).
 The result is only valid for arena runs whose search semantics match
 :func:`search_semantics` exactly -- see ``experiments/JOURNAL.md``'s
 scale-reset entry.
+
+Chunked into per-pair CLI invocations (crash-safe: each pair's outcome is
+appended to the run dir before the next one starts)::
+
+    uv run python experiments/0004_alphazero/calibrate.py init
+    uv run python experiments/0004_alphazero/calibrate.py pair <run_dir> <a> <b> <n>
+    uv run python experiments/0004_alphazero/calibrate.py fit <run_dir>
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import NamedTuple
 
 from omegaconf import OmegaConf
-from settlrl_agents import BeliefSpec
+from settlrl_agents import POLICIES, BeliefSpec
 from settlrl_agents.evaluate import evaluate
+from settlrl_learn.experiment import Config, Run, start_run
 from settlrl_learn.training import OpponentSpec
 from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
 
@@ -32,7 +41,7 @@ RUNGS: tuple[str, ...] = ("random", "greedy", "lookahead", "mcts")
 """The ``POLICIES`` rungs in the round-robin (registry names)."""
 
 AZ0_NAME = "az0_gnn96x4"
-"""The frozen checkpoint's anchor artifact name (``0004_alphazero/anchors/``)."""
+"""The frozen checkpoint's anchor artifact name (``anchors/``)."""
 
 FIXED_ELOS: dict[str, float] = {"lookahead": 0.0}
 """The scale's origin: ``anchored_elo``'s convention (heuristic lookahead = 0)."""
@@ -53,7 +62,7 @@ PAIR_PLAN: list[tuple[str, str, int]] = [
 ]
 """Every unordered pair among ``RUNGS`` + ``AZ0_NAME``, once."""
 
-_ALPHAZERO_DIR = Path(__file__).resolve().parents[1] / "0004_alphazero"
+_ALPHAZERO_DIR = Path(__file__).resolve().parent
 
 
 class PairResult(NamedTuple):
@@ -69,7 +78,7 @@ class PairResult(NamedTuple):
 
 def search_semantics() -> dict[str, object]:
     """The frozen arena + search settings az0 plays the calibration at, read
-    straight from ``0004_alphazero``'s conf so this can't drift from what the
+    straight from this framework's conf so this can't drift from what the
     config change pins: ``conf/arena/scale.yaml``'s ``sims``/``considered`` and
     ``conf/search/scale.yaml``'s ``chance_nodes``/``dev_chance``/``ordered``."""
     arena = OmegaConf.to_container(
@@ -97,13 +106,11 @@ def az0_spec(
     ordered: bool,
 ) -> BeliefSpec:
     """The frozen az0 checkpoint as a seatable 2p spec, played by its own GNN
-    search at the given (arena-scale) budget -- mirrors 0004_alphazero's
+    search at the given (arena-scale) budget -- mirrors
     ``arena_helpers.py::build_net_opponents``."""
     if str(_ALPHAZERO_DIR) not in sys.path:
-        sys.path.insert(0, str(_ALPHAZERO_DIR))
-    # cross-framework sibling import (0004_alphazero/anchors.py); no stub
-    # there since script dirs aren't packages.
-    from anchors import (  # type: ignore[import-not-found]
+        sys.path.insert(0, str(_ALPHAZERO_DIR))  # same-dir sibling module
+    from anchors import (
         NET_OPPONENT_SETUP_BEAM,
         NET_OPPONENT_SETUP_DEPTH,
         NET_OPPONENT_SETUP_TEMPERATURE,
@@ -113,7 +120,7 @@ def az0_spec(
 
     net, netcfg = load_anchor(AZ0_NAME)
     # explicit, not default-coincidence: this calibration IS what pinned
-    # 0004_alphazero's anchors.NET_OPPONENT_SETUP_* (see that module's comment).
+    # anchors.NET_OPPONENT_SETUP_* (see that module's comment).
     backend = GNNBackend(
         netcfg, setup_depth=NET_OPPONENT_SETUP_DEPTH,
         setup_temperature=NET_OPPONENT_SETUP_TEMPERATURE,
@@ -215,3 +222,94 @@ def sanity_gates(
         "random_below": ratings["random"] < -600.0,
         "az0_in_range": -400.0 < ratings[az0_name] < 0.0,
     }
+
+
+class CalibrateConfig(Config):
+    seed: int = 0
+    batch_size: int = 64
+
+
+def _spec(name: str, semantics: dict[str, object]) -> OpponentSpec:
+    if name == AZ0_NAME:
+        return az0_spec(
+            sims=int(semantics["sims"]),  # type: ignore[call-overload]
+            considered=int(semantics["considered"]),  # type: ignore[call-overload]
+            chance_nodes=bool(semantics["chance_nodes"]),
+            dev_chance=bool(semantics["dev_chance"]),
+            ordered=bool(semantics["ordered"]),
+        )
+    return POLICIES[name]
+
+
+def run_calibrate_pair(
+    run: Run, cfg: CalibrateConfig, a: str, b: str, n_games: int
+) -> PairResult:
+    """Play one round-robin pair and append it to this run's matches
+    (crash-safe: recorded before the next pair starts, so a chunked sequence
+    of CLI invocations can be interrupted and resumed by re-reading the run
+    dir)."""
+    semantics = search_semantics()
+    result = play_pair(
+        a, _spec(a, semantics), b, _spec(b, semantics),
+        n_games=n_games, seed=cfg.seed, batch_size=cfg.batch_size,
+    )  # fmt: skip
+    with (run.dir / "matches.jsonl").open("a") as f:
+        f.write(json.dumps(result._asdict()) + "\n")
+    run.log(pair=f"{a}-{b}", **result._asdict())
+    return result
+
+
+def run_calibrate_fit(run: Run) -> str:
+    """Fit the joint Elo MLE over every recorded pair, check the sanity gates,
+    and record the matrix + fit + search semantics as this run's verdict
+    (``pass`` iff every gate holds, else ``blocked``)."""
+    lines = (run.dir / "matches.jsonl").read_text().splitlines()
+    results = [PairResult(**json.loads(line)) for line in lines]
+    ratings = joint_fit(results, FIXED_ELOS)
+    ses = joint_fit_se(results, ratings)
+    gates = sanity_gates(ratings)
+    verdict = "pass" if all(gates.values()) else "blocked"
+    run.save_json("matches.json", [r._asdict() for r in results])
+    run.finish(
+        verdict,
+        ratings=ratings,
+        se=ses,
+        gates=gates,
+        search_semantics=search_semantics(),
+        n_pairs=len(results),
+        n_games=sum(r.episodes for r in results),
+    )
+    return verdict
+
+
+_USAGE = (
+    "usage: calibrate.py {init|pair <run_dir> <a> <b> <n>|fit <run_dir>} "
+    "[key=value ...]"
+)
+
+
+def main(argv: list[str]) -> None:
+    if not argv or argv[0] in ("-h", "--help"):
+        print(_USAGE)
+        return
+    sub = argv[0]
+    if sub == "init":
+        cfg = CalibrateConfig.resolve({}, overrides=argv[1:])
+        run = start_run(Path(__file__).parent, cfg.dump())
+        print(run.dir)
+        return
+    run_dir = Path(argv[1])
+    run = Run(run_dir)
+    if sub == "pair":
+        a, b, n = argv[2], argv[3], int(argv[4])
+        cfg = CalibrateConfig.resolve({}, overrides=argv[5:])
+        print(run_calibrate_pair(run, cfg, a, b, n))
+        return
+    if sub == "fit":
+        print(run_calibrate_fit(run))
+        return
+    raise SystemExit(f"unknown subcommand {sub!r}\n{_USAGE}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

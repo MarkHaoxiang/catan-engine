@@ -31,13 +31,6 @@ def _verdict(run_dir: Path) -> str:
     return str(result["verdict"])
 
 
-def test_0001_bench_smoke(tmp_path: Path) -> None:
-    run = load_run("0001_bench_smoke")
-    cfg = run.BenchSmokeConfig.resolve({}, overrides=["games=4", "batch_size=4"])
-    run.run_bench(Run(tmp_path), cfg)
-    _verdict(tmp_path)
-
-
 def test_0002_value_fitting_smoke(tmp_path: Path) -> None:
     run = load_run("0002_linear_value_fitting")
     cfg = run.ValueFittingConfig.resolve({**run.VARIANTS["smoke"], "variant": "smoke"})

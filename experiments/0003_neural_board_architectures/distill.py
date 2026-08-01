@@ -48,7 +48,7 @@ def _anchor_module() -> ModuleType:
     if str(_ALPHAZERO_DIR) not in sys.path:
         sys.path.insert(0, str(_ALPHAZERO_DIR))
     # cross-framework sibling import (0004_alphazero/anchors.py); no stub
-    # there since script dirs aren't packages (mirrors 0001's calibrate).
+    # there since script dirs aren't packages.
     import anchors  # type: ignore[import-not-found]
 
     return cast(ModuleType, anchors)
