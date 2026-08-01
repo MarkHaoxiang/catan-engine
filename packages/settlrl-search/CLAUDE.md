@@ -165,6 +165,28 @@ strength lever:
   superset, *parity not a win* at 3p (0.352 ± 0.031, n=244; 64 worlds 0.307 —
   more doesn't help; ~ties at 2p where the belief is ~exact).
 
+**Root legality comes from the caller's mask.** The per-call `mask` is the
+root's legal set in every determinization — `_run` seeds each simulation's
+root selection from it and `_descend` peels the depth-0 step (the root action
+is already fixed, so its sweep and interior select never run). Sound because
+every `action_available` core, at a root where the observer is the acting
+player (the search's standing root invariant), reads only public fields or
+aggregates `sample_world` pins — hand sizes, per-type resource totals (hence
+bank stock), dev counts, deck *size* (never composition), and the observer's
+own rows (`tests/test_sample.py`); the only hidden-adjacent read, `dev_bought`
+in `playable_dev`, sits behind `dev_play_window`, which is only true on the
+observer's own turn, where `belief_view` copies it exactly. The invariant is
+pinned by the mask-equivalence property test in `tests/test_ismcts.py` (env
+mask == each sampled world's legality sweep at real roots: 2p setup→mid-game,
+3p for the trade phases). Under `ordered` the mask carries the ordering
+overlay and that overlay is the root's legal set — the root respects the
+lock-out exactly as the interior does. Equivalence to a per-world root sweep
+verified 2026-08-01: exhaustive availability classification, an 8,400-root
+GPU probe with 0 differing bits, and move-for-move CPU bit-identity over real
+games (both descent machines, 2p and 3p). GPU search-step micro (gn_global
+96×4, 64 sims, RTX 5090): 324.6→316.5 ms median at B=64, 930.3→921.1 ms at
+B=256 — ~1–2.5%, the sweep is small next to the in-loop net forwards.
+
 **Strength: ~0.55–0.58 vs lookahead** (2p seat-swapped, n≥220 GPU). Contracts
 in `tests/test_ismcts.py`.
 

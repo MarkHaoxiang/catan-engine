@@ -260,6 +260,65 @@ def test_no_legal_actions_does_not_crash() -> None:
     assert 0 <= a < empty.shape[-1]
 
 
+def _assert_env_mask_matches_sampled_worlds(
+    env: BatchedSettlrlEnv, seed: int, n_roots: int, n_worlds: int = 8
+) -> None:
+    """At each of ``n_roots`` successive real roots (one random env step apart),
+    assert the env's plain flat mask equals the legality sweep of ``n_worlds``
+    sampled worlds — the invariant that lets the search take the caller's mask
+    as the root's legal set in every determinization."""
+    from settlrl_engine.belief import belief_view
+    from settlrl_search.ismcts._types import _LegalMask
+    from settlrl_search.ismcts.descent import _legal_mask
+    from settlrl_search.sample import sample_world
+
+    view_of = jax.jit(jax.vmap(belief_view, in_axes=(0, 0, 0)))
+
+    def world_mask(
+        key: KeyScalar, layout: BoardLayout, view: BeliefView, player: Player
+    ) -> _LegalMask:
+        return _legal_mask(layout, sample_world(key, view, player))
+
+    sweep = jax.jit(
+        jax.vmap(
+            jax.vmap(world_mask, in_axes=(0, None, None, None)),
+            in_axes=(0, 0, 0, 0),
+        )
+    )
+    for i in range(n_roots):
+        layout, state = env.board
+        selection = jnp.asarray(env.agent_selection)
+        mask = np.asarray(env.flat_mask())
+        view = view_of(state, env.beliefs, selection)
+        keys = jax.random.split(jax.random.key(seed + i), (env.batch_size, n_worlds))
+        worlds = np.asarray(sweep(keys, layout, view, selection)) > 0
+        assert (worlds == mask[:, None, :]).all()
+        env.rollout(jax.random.key(1000 + seed + i), 1)
+
+
+def test_env_root_mask_equals_every_sampled_worlds_legality() -> None:
+    # The root's legal set is the caller's mask in every determinization, so the
+    # env's plain flat mask must equal each sampled world's legality sweep at a
+    # real root: root availability reads only observer-visible state, which
+    # `sample_world` pins (public fields, hand sizes, per-type totals, deck
+    # size, the observer's own rows). Checked from setup into the opening and
+    # again mid-game (robber/discard roots in reach).
+    env = BatchedSettlrlEnv(batch_size=3, seed=6, n_players=2, track_beliefs=True)
+    _assert_env_mask_matches_sampled_worlds(env, seed=3, n_roots=6)
+    env.rollout(jax.random.key(9), 110)  # into the mid-game
+    _assert_env_mask_matches_sampled_worlds(env, seed=50, n_roots=4)
+
+
+def test_env_root_mask_matches_sampled_worlds_at_three_players() -> None:
+    # Three seats put the trade actions in reach (statically illegal at 2p):
+    # PROPOSE_TRADE reads the partner's hand *size* and ACCEPT_TRADE the acting
+    # partner's own hand, both observer-visible, so the equivalence must hold on
+    # TRADE_RESPONSE roots too.
+    env = BatchedSettlrlEnv(batch_size=3, seed=1, n_players=3, track_beliefs=True)
+    env.rollout(jax.random.key(7), 130)
+    _assert_env_mask_matches_sampled_worlds(env, seed=80, n_roots=4)
+
+
 @pytest.mark.slow
 def test_self_play_completes_a_game() -> None:
     env = BatchedSettlrlEnv(batch_size=1, seed=4, n_players=2, track_beliefs=True)

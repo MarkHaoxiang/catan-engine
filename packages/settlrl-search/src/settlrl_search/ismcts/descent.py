@@ -242,16 +242,18 @@ def _descend(
     def cond(walk: _Descent) -> BoolScalar:
         return (~walk.done) & (walk.depth < cfg.max_depth)
 
-    def body(walk: _Descent) -> _Descent:
-        # `tree` is read-only here; the current node is non-terminal with a legal
-        # action.
+    def selected(walk: _Descent) -> _Action:
+        # The step's action: the improved-policy rule over this world's legal
+        # set (the ordering lock-out ANDed in when on). Runs only past the
+        # peeled depth-0 step, so the root (whose action is `a_root`) never
+        # reaches it.
         legal = _legal_mask(layout, walk.state)
         if cfg.ordered:
             legal = jnp.where(ordering_mask(walk.state, walk.category), legal, 0.0)
-        at_root = (walk.cur == 0) & (walk.depth == 0)
-        action = jnp.where(
-            at_root, a_root, _interior_select(tree, walk.cur, legal, player)
-        )
+        return _interior_select(tree, walk.cur, legal, player)
+
+    def advance(walk: _Descent, action: _Action) -> _Descent:
+        # One decision step by `action`; `tree` is read-only here.
         next_state = _step(layout, walk.state, action)
         is_leaf = tree.children[walk.cur, action] < 0  # unexpanded edge -> stop here
         category = (
@@ -278,32 +280,37 @@ def _descend(
             category=category,
         )
 
-    def body_chance(walk: _Descent) -> _Descent:
-        # Decision/chance state machine. A decision node selects an action (root by
-        # Sequential Halving, else the improved-policy rule); a *stochastic* action
-        # (roll, or dev-buy under dev_chance) defers to a chance node (the
-        # afterstate, action unapplied). A chance node samples its outcome at the
-        # true probability and applies the forced transition. Both branches are
-        # computed every step (vmap runs both) and `where`-selected by node kind.
-        key, k_out = jax.random.split(walk.key)
-        is_chance = tree.kind[walk.cur] == _CHANCE
-        legal = _legal_mask(layout, walk.state)
-        if cfg.ordered:  # decision-node selection only (chance samples by outcome)
-            legal = jnp.where(ordering_mask(walk.state, walk.category), legal, 0.0)
-        at_root = (walk.cur == 0) & (walk.depth == 0)
-        action = jnp.where(
-            at_root, a_root, _interior_select(tree, walk.cur, legal, player)
-        )
-        stoch = _is_stochastic(cfg, action)
-        pending = walk.path_act[walk.depth - 1]  # the action that created this node
-        outcome = _sample_outcome(cfg, k_out, pending, walk.state)
+    def body(walk: _Descent) -> _Descent:
+        return advance(walk, selected(walk))
 
+    def advance_chance(
+        walk: _Descent, action: _Action, root_decision: bool
+    ) -> _Descent:
+        # Decision/chance state machine step. A decision node's *stochastic*
+        # `action` (roll, or dev-buy under dev_chance) defers to a chance node
+        # (the afterstate, action unapplied). A chance node samples its outcome at
+        # the true probability and applies the forced transition. Both branches
+        # are computed every step (vmap runs both) and `where`-selected by node
+        # kind — except under `root_decision` (static): the root is always a
+        # decision node (`tree.kind[0]` stays ``_DECISION``), so the chance
+        # branch drops out.
+        key, k_out = jax.random.split(walk.key)
+        stoch = _is_stochastic(cfg, action)
         # decision step: defer a stochastic action (afterstate = current state),
-        # else apply it. chance step: resolve the pending action's forced outcome.
+        # else apply it.
         dec_state = _select_state(stoch, walk.state, _step(layout, walk.state, action))
-        chance_state = _resolve_chance(cfg, layout, walk.state, pending, outcome)
-        next_state = _select_state(is_chance, chance_state, dec_state)
-        edge = jnp.where(is_chance, outcome, action)
+        if root_decision:
+            is_chance: BoolScalar = jnp.bool_(False)
+            next_state = dec_state
+            edge = action
+        else:
+            is_chance = tree.kind[walk.cur] == _CHANCE
+            # chance step: resolve the pending action's forced outcome.
+            pending = walk.path_act[walk.depth - 1]  # the action creating this node
+            outcome = _sample_outcome(cfg, k_out, pending, walk.state)
+            chance_state = _resolve_chance(cfg, layout, walk.state, pending, outcome)
+            next_state = _select_state(is_chance, chance_state, dec_state)
+            edge = jnp.where(is_chance, outcome, action)
         next_kind = jnp.where(
             is_chance, _DECISION, jnp.where(stoch, _CHANCE, _DECISION)
         )
@@ -333,7 +340,22 @@ def _descend(
             category=category,
         )
 
-    return jax.lax.while_loop(cond, body_chance if cfg.chance_nodes else body, walk)
+    def body_chance(walk: _Descent) -> _Descent:
+        return advance_chance(walk, selected(walk), root_decision=False)
+
+    step = body_chance if cfg.chance_nodes else body
+
+    # The depth-0 step is peeled: the root action is already fixed (`a_root`),
+    # so its legality sweep and interior select never run. The peel is guarded
+    # exactly like `cond` (a terminal root takes no step; depth 0 < max_depth
+    # holds statically).
+    def root_step(walk: _Descent) -> _Descent:
+        if cfg.chance_nodes:
+            return advance_chance(walk, a_root, root_decision=True)
+        return advance(walk, a_root)
+
+    walk = jax.lax.cond(walk.done, lambda walk: walk, root_step, walk)
+    return jax.lax.while_loop(cond, step, walk)
 
 
 def _evaluate(

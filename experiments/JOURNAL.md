@@ -301,3 +301,11 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   Honest dynamics note: the +14.8% is throughput-only — a game now spans ~2×
   the iterations, so flushed policy targets are up to ~2× staler in updates,
   and the 8-iteration teacher warm-up covers under one median game per lane.
+- Root-legality reuse adopted unconditionally (2026-08-01): the search takes
+  the caller's env root mask as every determinization's root legal set and
+  peels the descent's depth-0 step — no flag, no per-world root sweep. Bit-
+  identity to the per-world-sweep root verified pre-deletion: exhaustive
+  availability classification, an 8,400-root probe with 0 differing bits,
+  move-for-move CPU bit-identity over real games (both descent machines,
+  2p + 3p). GPU search-step micro: 324.6→316.5 ms at B=64 / 930.3→921.1 ms
+  at B=256 (~1–2.5%).

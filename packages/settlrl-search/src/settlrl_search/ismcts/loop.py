@@ -29,7 +29,6 @@ from .descent import (
     _descend,
     _determinize,
     _evaluate,
-    _legal_mask,
     _value,
 )
 from .tree import _backup, _completed_q, _expand, _root_select, _Tree
@@ -76,10 +75,8 @@ def _run(
         walk = _determinize(cfg, keys[s + 1], layout, view, player)
 
         # SELECT (root): the Sequential-Halving action for this simulation.
-        world_legal = _legal_mask(layout, walk.state)
-        a_root = _root_select(
-            tree, cfg, gumbel, num_considered, root_legal, world_legal, player
-        )
+        # `root_legal` is every world's root legal set (see CLAUDE.md).
+        a_root = _root_select(tree, cfg, gumbel, num_considered, root_legal, player)
 
         # SELECT (descend): walk to an unexpanded leaf (no value work in the loop).
         walk = _descend(cfg, tree, a_root, walk, layout, player)
@@ -140,7 +137,12 @@ def make_tree(
     in the tree (dice always, dev-card buys when ``dev_chance``) — nature's move
     sampled at its true probability and applied via the engine's forced-outcome
     seam, so the search can plan *past* a roll. It supersedes ``expected_rolls``
-    (a leaf-only roll EV), so the two are mutually exclusive."""
+    (a leaf-only roll EV), so the two are mutually exclusive.
+
+    The root's legal set is the per-call ``mask`` — the same mask that fixes the
+    root candidate set; interior nodes recompute legality per sampled world.
+    Under ``ordered`` the mask carries the ordering overlay and the root
+    respects it."""
     sc = SearchConfig(
         num_simulations=num_simulations,
         max_depth=max_depth,

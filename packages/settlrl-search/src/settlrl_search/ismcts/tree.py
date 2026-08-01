@@ -110,27 +110,27 @@ def _root_select(
     cfg: "_Cfg",
     gumbel: _FlatVec,
     num_considered: IntScalar,
-    candidates: _LegalMask,
-    world_legal: _LegalMask,
+    legal: _LegalMask,
     player: Player,
 ) -> _Action:
-    """The root action for this simulation: the Sequential-Halving pick over the
-    fixed ``candidates`` set (the highest ``gumbel + prior + completed_Q`` among
-    candidates at the schedule's current visit count), guarded to this
-    determinization's ``world_legal``. A candidate can be illegal in some worlds
-    (e.g. steal targets), so fall back to interior selection when the pick is."""
+    """The root action for this simulation: the Sequential-Halving pick over
+    ``legal`` — the caller's mask, the root's legal set in every world (the
+    highest ``gumbel + prior + completed_Q`` among candidates at the schedule's
+    current visit count). A degenerate pick (all candidate scores ``-inf``) can
+    land outside ``legal``; falling back to interior selection keeps the return
+    well-defined."""
     visits = tree.n[0].astype(jnp.float32)
     sim_index = jnp.minimum(visits.sum().astype(jnp.int32), cfg.num_simulations - 1)
-    cq, logits = _completed_q(tree, jnp.int32(0), candidates, player)
+    cq, logits = _completed_q(tree, jnp.int32(0), legal, player)
     considered_visit = cfg.table[num_considered, sim_index].astype(jnp.float32)
     norm_logits = logits - jnp.max(logits)
     penalty = jnp.where(visits == considered_visit, 0.0, -jnp.inf)
     score = jnp.maximum(-1e9, gumbel + norm_logits + cq) + penalty
-    a_root = jnp.argmax(jnp.where(candidates > 0, score, -jnp.inf)).astype(jnp.int32)
+    a_root = jnp.argmax(jnp.where(legal > 0, score, -jnp.inf)).astype(jnp.int32)
     return jnp.where(
-        world_legal[a_root] > 0,
+        legal[a_root] > 0,
         a_root,
-        _interior_select(tree, jnp.int32(0), world_legal, player),
+        _interior_select(tree, jnp.int32(0), legal, player),
     )
 
 
