@@ -256,3 +256,10 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   RTX 5090; run runs/0004_alphazero/2026-08-01T154603Z) — the hetero track's
   before number. The gn_global pin (bench_throughput, az0, B=256/64 sims)
   stays valid for its own recipe.
+- 0004 setup-row-restricted opener adopted (2026-08-01, d11b50e). The setup
+  policy sweeps the 126 setup rows instead of all 662 through `apply_action`
+  (bit-identical moves and RNG stream; lockstep contract test): pinned
+  hetero gauge 675.36 → **770.94 samples/s (+14.2%)**
+  (runs/0004_alphazero/2026-08-01T154603Z → .../2026-08-01T174013Z); the
+  sims=16 fast arm ~2.7k → ~5.3k samples/s (fast steps are where the setup
+  sweep dominated).

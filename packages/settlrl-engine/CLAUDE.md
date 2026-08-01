@@ -66,7 +66,11 @@ public `<name>_available` / `<name>_step` plus the private single-game
 `_<name>_avail` / `_<name>_apply` used by the dispatch. `_<name>_apply` takes
 the precomputed `available` legality instead of computing it: under `vmap`
 every `lax.switch` branch runs, so an internal avail call would be paid ~18×
-per lane. A core applies only its own state change; award reassignment and the
+per lane. The two setup apply cores (`_setup_settlement_apply` /
+`_setup_road_apply`) have an external consumer: settlrl-search's
+`make_setup_lookahead` calls them directly under a bit-identity contract
+(its lockstep test breaks on any behavior change here). A core applies only
+its own state change; award reassignment and the
 win check are **stage 2**, run once per step by `awards.resolve_step`. The
 `*_step` wrappers that can change an award (BuildRoad / BuildSettlement /
 BuildCity / BuyDevelopmentCard / PlayKnight) route through `resolve_step_b` so

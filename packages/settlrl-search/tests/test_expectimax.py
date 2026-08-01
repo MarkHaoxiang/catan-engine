@@ -12,6 +12,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
+from conftest import heuristic_value
 from settlrl_engine.belief import belief_view
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, GamePhase, Player
@@ -19,7 +20,6 @@ from settlrl_engine.env import BatchedSettlrlEnv, flat_to_action
 from settlrl_search import make_search
 from settlrl_search.expectimax import make_setup_lookahead
 from settlrl_search.value import Value
-from test_ismcts import heuristic_value
 
 
 def test_setup_lookahead_matches_the_full_sweep_bitwise() -> None:

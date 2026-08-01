@@ -19,12 +19,10 @@ with **more than two players**, where assuming three optimal openers is far too
 pessimistic.
 
 It is built as a **full ``beam``-ary tree expanded level by level** (node ``i``'s
-children are ``beam*i .. beam*i+beam-1`` one level down). Each level is one
-``vmap(apply_action)`` over the frontier -- compiled once per level, so the cost
-is ``depth`` compiles, not the thousands of inlined transitions a recursive
-unroll would bake in (the latter compiles for minutes past depth ~4). A modest
-``beam`` keeps ``beam**depth`` states tractable, so depth 6-8 -- enough to reach
-the *complementary second settlement* in snake order -- is reachable.
+children are ``beam*i .. beam*i+beam-1`` one level down), one
+``vmap(apply_action)`` over the frontier per level. A modest ``beam`` keeps
+``beam**depth`` states tractable, so depth 6-8 -- enough to reach the
+*complementary second settlement* in snake order -- is reachable.
 """
 
 from __future__ import annotations
@@ -64,10 +62,16 @@ _N_SETUP = int(_SETUP_IDX.shape[0])
 # ``make_setup_lookahead`` relies on the setup rows being the flat table's
 # leading block -- all settlements, then all roads -- so a sweep index is
 # already its flat row and the mask/noise prefixes line up.
-assert np.array_equal(np.asarray(_SETUP_IDX), np.arange(_N_SETUP))
+assert np.array_equal(np.asarray(_SETUP_IDX), np.arange(_N_SETUP)), (
+    "setup rows must be the flat table's leading block "
+    "(make_setup_lookahead slices prefixes)"
+)
 assert np.all(
     np.asarray(_SETUP_TYPE[:N_VERTICES]) == int(ActionType.SETUP_SETTLEMENT)
-) and np.all(np.asarray(_SETUP_TYPE[N_VERTICES:]) == int(ActionType.SETUP_ROAD))
+), "setup block must lead with the settlement rows (make_setup_lookahead)"
+assert np.all(np.asarray(_SETUP_TYPE[N_VERTICES:]) == int(ActionType.SETUP_ROAD)), (
+    "setup block must end with the road rows (make_setup_lookahead)"
+)
 
 
 def make_setup_lookahead(value: ValueFunction) -> BeliefPolicy:
