@@ -228,7 +228,7 @@ while a non-raw seed gets every `\` doubled into unreadable hex art.
   exact (`lo == hi`), recovering "2p is perfect-info up to dev identities"
   from the tracker rather than assuming it. `BeliefView` is deliberately *not*
   a `BoardState`: hidden state is unrepresentable, not placeholdered, and the
-  only road back to a playable position is settlrl-agents' `sample_world`.
+  only road back to a playable position is settlrl-search's `sample_world`.
   `own_bought` is zeroed off-turn — sampled opponents may therefore play a
   just-bought card one turn early (documented approximation). The
   public/hidden classification is total and forced:
@@ -255,5 +255,5 @@ while a non-raw seed gets every `\` doubled into unreadable hex art.
   `track_ordering` (a Python-level post-step AND into `self._avail`, mirroring
   `track_beliefs`; `_env_step_core` untouched). Transposition-safe except two rare
   accepted losses (single-category scheme): same-turn settlement→city upgrade, and
-  trading at a same-turn-built port's rate. settlrl-agents' search consumes it
+  trading at a same-turn-built port's rate. settlrl-search's search consumes it
   (`ordered` flag) for the AlphaZero search-space reduction.

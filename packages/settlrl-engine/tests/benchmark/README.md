@@ -1,7 +1,7 @@
 # Benchmarks
 
 Throughput benchmarks for the RL environments under random legal play, built on
-[pytest-benchmark](https://pytest-benchmark.readthedocs.io/). Two rollouts are
+[pytest-benchmark](https://pytest-benchmark.readthedocs.io/). Three rollouts are
 measured:
 
 - **`test_batched_env_random_rollout[N-Pp]`** — a batch of games stepped in
@@ -9,16 +9,19 @@ measured:
   action per lane per step. Swept over batch sizes `N` ∈ {1, 8, 64, 512}
   (grouped per player count in the output) to show how the per-step cost
   amortises across the batch.
+- **`test_batched_env_rollout_scan[N-Pp]`** — the same random play through the
+  fused `rollout` (one `lax.scan` dispatch per window), without the per-step
+  host round trips; same batch-size sweep.
 - **`test_aec_env_random_rollout[Pp]`** — a single game played turn-at-a-time
   through the PettingZoo `SettlrlAECEnv`.
 
-Both are swept over player counts `P` ∈ {2, 4} and over devices: `cpu` always,
+All are swept over player counts `P` ∈ {2, 4} and over devices: `cpu` always,
 plus `cuda` when an NVIDIA GPU is usable (see below) — otherwise the CUDA
 variants are skipped. Each variant pins its device explicitly, so the CPU
 numbers stay CPU numbers even on a machine where the GPU is JAX's default
 backend.
 
-Both pick only *legal* moves (screened by the engine's own action mask), so every
+All pick only *legal* moves (screened by the engine's own action mask), so every
 action type is exercised, including the forced discard / move-robber after a 7.
 
 These tests carry the `benchmark` marker and are **deselected from the default

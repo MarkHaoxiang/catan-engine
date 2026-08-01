@@ -6,8 +6,8 @@ an ordinary pytree, `.npz` artifacts) is deliberately dependency-free so a
 trained model can ship without training libraries.
 
 `experiment/` is the lab harness for `experiments/` (`Run`/`start_run`
-bookkeeping + the pydantic/OmegaConf `Config` base) — moved here from
-settlrl-agents, a training-side concern. *Not* imported by `__init__`, so
+bookkeeping + the pydantic/OmegaConf `Config` base) — a training-side
+concern, kept out of settlrl-agents. *Not* imported by `__init__`, so
 `import settlrl_learn` (and the play/serve library) stays free of
 `pydantic`/`omegaconf`, which are learn deps only because this subpackage
 uses them.
@@ -25,10 +25,9 @@ uses them.
   `nn/__init__`:
   - `nn/mlp.py::AZParams` — the shared-trunk value+policy net (`make_az` adapts
     it onto the search's `value`/`prior` seams). Plain-JAX, root-importable.
-    The value head is a win-probability logit: the searches read leaves as
-    `tanh(v / value_scale) = 2P(win) − 1`, so logistic targets line up with the
-    June 11 calibration finding (P(win) = σ(0.053·v_heuristic)), and the logit
-    maps in with `value_scale=2` (`tanh(logit/2) = 2P−1`).
+    The value head is a win-probability logit, coupled to the search's leaf
+    squash: `tanh(logit / value_scale) = 2P(win) − 1` with `value_scale=2`, so
+    the two sides must change together.
     Both adapters (`make_az`, `gnn_seams`) return their prior as a
     `settlrl_search.policy.ValuePrior` — a prior that also serves the value off
     the *same* forward. The search evaluates a leaf through it, so one trunk pass
@@ -195,8 +194,8 @@ uses them.
     `empty_item` / `init_opt` / `make_step` / `eval_metrics`) and `RunState`
     (net + optimiser moments + replay buffer + iteration + best + the self-play
     carry). `RunState` is **eqx-serialised** (`save_run_state`): eqx's leaf
-    serialiser fits both an equinox module and a plain-JAX pytree, replacing
-    orbax for both backends. `selfplay_carry` is the padded self-play pool
+    serialiser fits both an equinox module and a plain-JAX pytree, so one
+    format serves both backends. `selfplay_carry` is the padded self-play pool
     (below) and deliberately the **last** field, so a checkpoint written before
     it existed is exactly the file minus its trailing section — `load_run_state`
     reads the older fields and keeps the template's empty carry if the file ends
@@ -370,11 +369,10 @@ uses them.
     — id-keyed, referents held alive in the value, a net-static guard) over
     `settlrl_agents.evaluate.compile_evaluate`, with the current net's *and* a
     `NetOpponent`'s arrays as traced arguments — so an arena round retraces
-    nothing after its first firing (previously ~2 fused-scan recompiles per
-    opponent per round every round, the fresh-closure retrace: production
-    round at the scale config measured 548.5 s cold → 363.0 s cached,
-    2026-08-01, vs 521.2 s/round pre-change where every round paid the
-    compiles). Bit-identity with the plain `evaluate` composition is pinned
+    nothing after its first firing (an unmemoised round pays ~2 fused-scan
+    recompiles per opponent, the fresh-closure retrace: production round at
+    the scale config measured 548.5 s cold → 363.0 s cached, 2026-08-01).
+    Bit-identity with the plain `evaluate` composition is pinned
     by `test_arena_spec_matches_the_plain_evaluate_composition`; a
     `StatefulSpec` opponent falls back to the uncached stepwise driver
     (nothing fused to cache). `episodes` is the real
@@ -471,7 +469,7 @@ twice (az1, az2 — JOURNAL 2026-07-30/31).
 
 A Rust AlphaZero framework whose flagship example is a 1v1 Catan agent
 (`nexus-v3`, claimed "strongest public 1v1 Catan agent" — unbenchmarked against
-ours). It sits past our leaf-is-the-ceiling gate: learned policy + WDL value
+ours). It already runs the stack we train toward: learned policy + WDL value
 head, self-play, Gumbel improved-policy interior selection + PUCT/Dirichlet
 root (800 sims), explicit chance nodes for dice and dev draws, and
 Single-Observer ISMCTS filtering per-simulation legality in a custom tree

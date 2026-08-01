@@ -50,8 +50,8 @@ serves one. It's the `settlrl-app` game server's only source of bot moves
 `__init__`, so `import settlrl_agents` stays free of `fastapi`
 (`sdk.py`/`app.py` themselves are JAX-free; only `bots.py` pulls the engine). The
 `bridge.py` dtype contract is exact: engine
-`BoardLayout`/`BoardState` arrays are `uint8` (jaxtyping-enforced under the test
-hook — render's conftest never checked engine types, so an int32 slipped by).
+`BoardLayout`/`BoardState` arrays are `uint8`, jaxtyping-enforced under the
+test hook — the only guard, since the app side never checks engine dtypes.
 
 ## API layer and agents
 
@@ -147,8 +147,7 @@ registry families locally.
 
 The stateful decision-tree class: per-game plain-Python agents whose
 *strategy* is code (plans, saving, award races, trade memory) and whose
-*tactics* consult a one-step lookahead (hybrid sanctioned June 12; it was
-value-free before). `pov.py` is the host-side toolkit — one `Pov` per
+*tactics* consult a one-step lookahead. `pov.py` is the host-side toolkit — one `Pov` per
 decision wrapping the host-fetched observation, the static board graph
 re-stated as numpy/python tables (`VERTEX_*`, `EDGE_ENDPOINTS`,
 `TILE_CORNERS`), and the flat table's host decode (`flat_row`,
@@ -181,9 +180,9 @@ Measured neutral on the lookahead rung; kept as the principled tie-break
 chance seams: `roll_expectation` (exact 11-outcome forced rolls — decides
 the pre-roll knight: play iff the relocation raises the expectation of our
 own pending roll by > 0.3) and a deck-weighted exact dev-draw expectation
-replacing the sweep's single-sample BUY_DEV value. Both measured neutral —
-the same lesson as smcts: with the shared stationary heuristic leaf, exact
-chance handling doesn't convert into strength; the leaf is the ceiling.
+replacing the sweep's single-sample BUY_DEV value. Both measured neutral:
+with the shared stationary heuristic leaf, exact chance handling doesn't
+convert into strength.
 
 Design invariants:
 
