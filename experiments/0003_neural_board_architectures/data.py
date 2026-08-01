@@ -40,6 +40,10 @@ from settlrl_search.policy import StatefulSpec
 
 _CACHE = Path(__file__).resolve().parents[2] / "runs" / "_cache" / "0003"
 
+_CACHE_SCHEMA = 6
+"""Suffix on every cache file; bump whenever the stored arrays' meaning changes
+(fields, layout, or the set of config knobs hashed into the key)."""
+
 
 class Dataset(NamedTuple):
     samples: Sample  # batched over a leading sample axis
@@ -51,7 +55,10 @@ class Dataset(NamedTuple):
 
 
 def _key(cfg: dict) -> str:
-    keys = ("agent", "players", "n_samples", "snapshot_every", "batch_size", "seed")
+    keys = (
+        "agent", "players", "n_samples", "snapshot_every", "batch_size", "seed",
+        "version", "incidence",
+    )  # fmt: skip
     blob = json.dumps({k: cfg[k] for k in keys}, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
@@ -66,10 +73,17 @@ def _collect(cfg: dict) -> Dataset:
         n_players=players, track_beliefs=True,
     )  # fmt: skip
     pickers = [jax.jit(_picker(agent, players, i)) for i in range(players)]
+    version = cfg["version"]
+    incidence = cfg["incidence"]
     feat = jax.jit(
         jax.vmap(
             lambda lo, st: board_sample(
-                lo, st, jnp.int32(0), features=engineered_features
+                lo,
+                st,
+                jnp.int32(0),
+                features=engineered_features,
+                version=version,
+                incidence=incidence,
             )
         )
     )
@@ -139,7 +153,7 @@ def _collect(cfg: dict) -> Dataset:
 
 def generate(cfg: dict) -> Dataset:
     """Collect (or load from ``runs/_cache``) the supervised dataset for ``cfg``."""
-    path = _CACHE / f"{_key(cfg)}-v5.npz"  # -v5: per-hex tile features
+    path = _CACHE / f"{_key(cfg)}-v{_CACHE_SCHEMA}.npz"
     if path.exists():
         with np.load(path) as d:
             samples = Sample(

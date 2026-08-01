@@ -130,9 +130,16 @@ with senders/receivers as module constants, plus the engineered vector) and the
 architectures (`settlrl_learn.nn.architectures`: `mlp_engineered` baseline,
 `mlp_flat` structure-blind, `deepset` set, `gnn` jraph `GraphNetwork` + readout)
 live in settlrl-learn (their symmetry contracts are tested there); this
-framework only composes them. `train.py` is optax adamw + wandb (`mode`
-configurable; `disabled` in tests) + best-val equinox checkpointing,
-standardizing inputs on the train split.
+framework only composes them. `feature_version` / `incidence` select the
+versioned `settlrl_learn.nn.graph` feature set: threaded into `board_sample`
+during collection (part of the data cache key, whose filename suffix is
+`data._CACHE_SCHEMA`) and into `make_model`, which sizes every architecture
+from `graph.dims`. `seeds` trains per-arch replicates varying only the
+model-init key and minibatch-shuffle seed (data collection and split stay on
+`seed`); `results.json` records per-seed values plus `<metric>_mean` /
+`<metric>_spread`, and the verdict reads the mean. `train.py` is optax adamw +
+wandb (`mode` configurable; `disabled` in tests) + best-val equinox
+checkpointing, standardizing inputs on the train split.
 
 Stack additions (dev group): `equinox`, `optax`, `jraph`, `wandb`. Run on GPU
 with `XLA_PYTHON_CLIENT_PREALLOCATE=false` to coexist with other GPU work.
@@ -144,8 +151,11 @@ board features usable.
 
 The `road` target (seat-0 longest-road trail length) and the `ablate_*`
 variants drive the GraphNet lever ablation over `settlrl_learn.nn.graphnet.PRESETS`
-(report.md): GNNs ≫ engineered on the structural target (R² 0.99 vs 0.83),
-attention is the wrong bias for counting tasks, and `gn_global` (sum-MPNN +
-global node + multi readout + LayerNorm) won the 0003 supervised ablation;
-the 0004 four-arm study (2026-07-30) then showed `gn_hetero` beats it by ~3σ
-in the full AZ loop, and `gn_hetero` is the adopted trunk.
+(`gn_hetero` included; report.md): GNNs ≫ engineered on the structural target
+(R² 0.99 vs 0.83), attention is the wrong bias for counting tasks, and
+`gn_global` (sum-MPNN + global node + multi readout + LayerNorm) won the 0003
+supervised ablation; the 0004 four-arm study (2026-07-30) then showed
+`gn_hetero` beats it by ~3σ in the full AZ loop, and `gn_hetero` is the
+adopted trunk. `hetero_v2` is the architecture-guard head-to-head: `gn_global`
+vs `gn_hetero` on the multi task at `feature_version=2`, three seed
+replicates.

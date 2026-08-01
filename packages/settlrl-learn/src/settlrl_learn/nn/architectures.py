@@ -37,13 +37,11 @@ from settlrl_engine.board.state import KeyScalar
 
 from settlrl_learn.features import FEATURE_DIM
 from settlrl_learn.nn.graph import (
-    EDGE_DIM,
-    GLOBAL_DIM,
     N_DIR_EDGES,
-    NODE_DIM,
     RECEIVERS,
     SENDERS,
     Sample,
+    dims,
 )
 from settlrl_learn.nn.graphnet import PRESETS, GraphNet
 
@@ -55,9 +53,18 @@ class MLPModel(eqx.Module):
     engineered: bool = eqx.field(static=True)
 
     def __init__(
-        self, key: KeyScalar, *, out_dim: int, width: int, depth: int, engineered: bool
+        self,
+        key: KeyScalar,
+        *,
+        out_dim: int,
+        width: int,
+        depth: int,
+        engineered: bool,
+        feature_version: int = 1,
+        incidence: bool = False,
     ) -> None:
-        in_dim = FEATURE_DIM if engineered else N_VERTICES * NODE_DIM + GLOBAL_DIM
+        node_dim, _, global_dim, _ = dims(feature_version, incidence)
+        in_dim = FEATURE_DIM if engineered else N_VERTICES * node_dim + global_dim
         self.net = eqx.nn.MLP(in_dim, out_dim, width, depth, key=key)
         self.engineered = engineered
 
@@ -76,10 +83,20 @@ class DeepSetModel(eqx.Module):
     phi: eqx.nn.MLP  # per-node encoder
     rho: eqx.nn.MLP  # head over pooled nodes + globals
 
-    def __init__(self, key: KeyScalar, *, out_dim: int, width: int, depth: int) -> None:
+    def __init__(
+        self,
+        key: KeyScalar,
+        *,
+        out_dim: int,
+        width: int,
+        depth: int,
+        feature_version: int = 1,
+        incidence: bool = False,
+    ) -> None:
         k1, k2 = jax.random.split(key)
-        self.phi = eqx.nn.MLP(NODE_DIM, width, width, depth, key=k1)
-        self.rho = eqx.nn.MLP(width + GLOBAL_DIM, out_dim, width, depth, key=k2)
+        node_dim, _, global_dim, _ = dims(feature_version, incidence)
+        self.phi = eqx.nn.MLP(node_dim, width, width, depth, key=k1)
+        self.rho = eqx.nn.MLP(width + global_dim, out_dim, width, depth, key=k2)
 
     def __call__(self, s: Sample) -> Float[Array, "out"]:
         h = jax.vmap(self.phi)(s.nodes).mean(axis=0)
@@ -122,12 +139,21 @@ class GNNModel(eqx.Module):
     head: eqx.nn.MLP
 
     def __init__(
-        self, key: KeyScalar, *, out_dim: int, width: int, depth: int, layers: int
+        self,
+        key: KeyScalar,
+        *,
+        out_dim: int,
+        width: int,
+        depth: int,
+        layers: int,
+        feature_version: int = 1,
+        incidence: bool = False,
     ) -> None:
         keys = jax.random.split(key, 4 + layers)
-        self.node_enc = eqx.nn.Linear(NODE_DIM, width, key=keys[0])
-        self.edge_enc = eqx.nn.Linear(EDGE_DIM, width, key=keys[1])
-        self.glob_enc = eqx.nn.Linear(GLOBAL_DIM, width, key=keys[2])
+        node_dim, edge_dim, global_dim, _ = dims(feature_version, incidence)
+        self.node_enc = eqx.nn.Linear(node_dim, width, key=keys[0])
+        self.edge_enc = eqx.nn.Linear(edge_dim, width, key=keys[1])
+        self.glob_enc = eqx.nn.Linear(global_dim, width, key=keys[2])
         self.layers = tuple(_GNNLayer(keys[4 + i], width) for i in range(layers))
         # readout: mean-pooled nodes + final globals.
         self.head = eqx.nn.MLP(2 * width, out_dim, width, depth, key=keys[3])
@@ -156,23 +182,37 @@ def make_model(
     width: int,
     depth: int,
     layers: int,
+    feature_version: int = 1,
+    incidence: bool = False,
 ) -> eqx.Module:
     """Build the named architecture: a fixed baseline (``mlp_engineered`` /
     ``mlp_flat`` / ``deepset`` / ``gnn``) or a configurable ``GraphNet`` preset
     (``settlrl_learn.nn.graphnet.PRESETS``), whose ``width`` / ``layers`` /
     ``head_depth`` are taken from ``width`` / ``layers`` / ``depth`` here so the
-    experiment's capacity knobs apply across presets."""
+    experiment's capacity knobs apply across presets. ``feature_version`` /
+    ``incidence`` size the model for that feature set (``graph.dims``);
+    ``mlp_engineered`` reads ``s.extra`` and is feature-set independent."""
     if arch == "mlp_engineered":
         return MLPModel(key, out_dim=out_dim, width=width, depth=depth, engineered=True)
     if arch == "mlp_flat":
         return MLPModel(
-            key, out_dim=out_dim, width=width, depth=depth, engineered=False
-        )
+            key, out_dim=out_dim, width=width, depth=depth, engineered=False,
+            feature_version=feature_version, incidence=incidence,
+        )  # fmt: skip
     if arch == "deepset":
-        return DeepSetModel(key, out_dim=out_dim, width=width, depth=depth)
+        return DeepSetModel(
+            key, out_dim=out_dim, width=width, depth=depth,
+            feature_version=feature_version, incidence=incidence,
+        )  # fmt: skip
     if arch == "gnn":
-        return GNNModel(key, out_dim=out_dim, width=width, depth=depth, layers=layers)
+        return GNNModel(
+            key, out_dim=out_dim, width=width, depth=depth, layers=layers,
+            feature_version=feature_version, incidence=incidence,
+        )  # fmt: skip
     if arch in PRESETS:
-        cfg = PRESETS[arch]._replace(width=width, layers=layers, head_depth=depth)
+        cfg = PRESETS[arch]._replace(
+            width=width, layers=layers, head_depth=depth,
+            feature_version=feature_version, incidence=incidence,
+        )  # fmt: skip
         return GraphNet(key, out_dim=out_dim, cfg=cfg)
     raise SystemExit(f"unknown arch {arch!r}")

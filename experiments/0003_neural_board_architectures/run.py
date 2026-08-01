@@ -13,7 +13,9 @@ hand-tuned value (a *local* target); ``win`` predicts seat 0's game outcome (a
 snapshots-to-game-end; ``multi`` trains one shared trunk with a head per target
 (win + heur + road + turns). Each ``arch`` is trained and held-out-scored;
 ``arch=all`` sweeps the four baselines and ranks, ``arch=a,b,c`` sweeps a named
-list (the GraphNet lever ablation).
+list (the GraphNet lever ablation). ``feature_version``/``incidence`` select the
+board feature set (data and models alike); ``seeds`` trains per-arch replicates
+(model-init/shuffle seed only) and the verdict reads the per-seed mean.
 
     uv run python experiments/0003_neural_board_architectures/run.py [variant] [k=v ...]
 """
@@ -31,12 +33,13 @@ ARCHS = ("mlp_engineered", "mlp_flat", "deepset", "gnn")
 # lever (settlrl_learn.nn.graphnet.PRESETS), so each row isolates one design choice.
 ABLATION = (
     "mlp_engineered", "gnn", "gn_base", "gn_multi", "gn_norm",
-    "gn_graphnorm", "gn_global", "gn_gat", "gn_jk", "gn_full",
+    "gn_graphnorm", "gn_global", "gn_gat", "gn_jk", "gn_full", "gn_hetero",
 )  # fmt: skip
 
 
 class NeuralBoardArchitecturesConfig(Config):
     seed: int = 0
+    seeds: int = 1  # model-init/shuffle replicates per arch (data stays on `seed`)
     task: str = "heuristic"  # heuristic | win
     arch: str = "all"  # all | one of ARCHS
     # data (greedy self-play, cached by these knobs under runs/_cache)
@@ -46,6 +49,9 @@ class NeuralBoardArchitecturesConfig(Config):
     snapshot_every: int = 8
     collect_batch: int = 64
     val_frac: float = 0.2
+    # featurization (settlrl_learn.nn.graph: feature set + incidence option)
+    feature_version: int = 1
+    incidence: bool = False
     # model
     width: int = 64
     depth: int = 2
@@ -73,9 +79,18 @@ VARIANTS: dict[str, dict[str, object]] = {
     # Multi-task: one shared trunk, a head per target (win + heur + road + turns).
     "multi": {"task": "multi", "arch": "all"},
     "ablate_multi": {"task": "multi", "arch": ",".join(ABLATION)},
+    # The architecture-guard head-to-head: adopted trunk vs challenger on the
+    # version-2 feature set, seed replicates so the verdict reads a mean.
+    "hetero_v2": {
+        "task": "multi",
+        "arch": "gn_global,gn_hetero",
+        "feature_version": 2,
+        "seeds": 3,
+    },
     "smoke": {
         "task": "heuristic",
         "arch": "all",
+        "feature_version": 2,
         "n_samples": 200,
         "snapshot_every": 16,
         "collect_batch": 8,
@@ -97,7 +112,7 @@ def run_experiment(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
     data_cfg = {
         "agent": cfg.agent, "players": cfg.players, "n_samples": cfg.n_samples,
         "snapshot_every": cfg.snapshot_every, "batch_size": cfg.collect_batch,
-        "seed": cfg.seed,
+        "seed": cfg.seed, "version": cfg.feature_version, "incidence": cfg.incidence,
     }  # fmt: skip
     ds = generate(data_cfg)
     train_ds, val_ds = split(ds, cfg.val_frac, seed=cfg.seed)
@@ -107,33 +122,53 @@ def run_experiment(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
     archs = ARCHS if cfg.arch == "all" else tuple(cfg.arch.split(","))
     select = select_metric(cfg.task)  # e.g. "win_auc" / "road_r2" (primary head)
     out_dim = len(TASK_FIELDS[cfg.task])  # multi-task trains one head per target
-    results: dict[str, dict[str, float]] = {}
+    # Per arch: seed replicates vary the model-init key and minibatch-shuffle
+    # seed only (data collection and split stay on `seed`). results.json holds,
+    # per metric, the per-seed value(s) plus `<metric>_mean` / `<metric>_spread`
+    # (max - min); the verdict reads the mean.
+    results: dict[str, dict[str, float | list[float]]] = {}
+    means: dict[str, dict[str, float]] = {}
     for arch in archs:
-        model = make_model(
-            arch, jax.random.key(cfg.seed),
-            out_dim=out_dim, width=cfg.width, depth=cfg.depth, layers=cfg.layers,
-        )  # fmt: skip
-        sub = Run(run.dir / arch)
-        sub.dir.mkdir(exist_ok=True)
-        metrics = train(sub, {**cfg.dump(), "arch": arch}, model, train_ds, val_ds)
-        results[arch] = metrics
-        run.log(arch=arch, **metrics)
+        per_seed: list[dict[str, float]] = []
+        for i in range(cfg.seeds):
+            model = make_model(
+                arch, jax.random.key(cfg.seed + i),
+                out_dim=out_dim, width=cfg.width, depth=cfg.depth, layers=cfg.layers,
+                feature_version=cfg.feature_version, incidence=cfg.incidence,
+            )  # fmt: skip
+            sub = Run(run.dir / (arch if cfg.seeds == 1 else f"{arch}-s{i}"))
+            sub.dir.mkdir(exist_ok=True)
+            metrics = train(
+                sub, {**cfg.dump(), "arch": arch, "seed": cfg.seed + i},
+                model, train_ds, val_ds,
+            )  # fmt: skip
+            per_seed.append(metrics)
+            run.log(arch=arch, **metrics)
+        entry: dict[str, float | list[float]] = {}
+        means[arch] = {}
+        for metric in per_seed[0]:
+            values = [m[metric] for m in per_seed]
+            means[arch][metric] = sum(values) / len(values)
+            entry[metric] = values[0] if cfg.seeds == 1 else values
+            entry[f"{metric}_mean"] = means[arch][metric]
+            entry[f"{metric}_spread"] = max(values) - min(values)
+        results[arch] = entry
     run.save_json("results.json", results)
 
-    # Verdict: a raw-board representation is competitive with the hand-tuned
-    # baseline (within 0.02 of it on the selection metric), or — no baseline in
-    # the run — the best model clears a sanity floor.
+    # Verdict (on the per-seed mean): a raw-board representation is competitive
+    # with the hand-tuned baseline (within 0.02 of it on the selection metric),
+    # or — no baseline in the run — the best model clears a sanity floor.
     floor = 0.55 if select.endswith("_auc") else 0.5
     key = f"best_{select}"
     learned = [a for a in archs if a != "mlp_engineered"]
     if "mlp_engineered" in results and learned:
-        baseline = results["mlp_engineered"].get(key, float("-inf"))
-        best_learned = max(results[a].get(key, float("-inf")) for a in learned)
+        baseline = means["mlp_engineered"].get(key, float("-inf"))
+        best_learned = max(means[a].get(key, float("-inf")) for a in learned)
         verdict = "pass" if best_learned >= baseline - 0.02 else "fail"
         run.finish(verdict, select=select, baseline=baseline, best_learned=best_learned,
-                   **{a: results[a].get(key) for a in archs})  # fmt: skip
+                   **{a: means[a].get(key) for a in archs})  # fmt: skip
     else:
-        score = max(results[a].get(key, float("-inf")) for a in archs)
+        score = max(means[a].get(key, float("-inf")) for a in archs)
         run.finish("pass" if score >= floor else "fail", select=select, score=score)
 
 
