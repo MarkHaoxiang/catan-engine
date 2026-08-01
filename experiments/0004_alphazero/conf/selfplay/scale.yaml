@@ -1,8 +1,8 @@
 samples: 16384
 batch: 256          # measured GPU throughput sweet spot WITHOUT persistent
                     # self-play (batch alone regresses past this -- discard
-                    # climbs to 91% at 1024); scale2.yaml pairs persistent
-                    # self-play with batch: 512 instead (JOURNAL 2026-07-28)
+                    # climbs to 91% at 1024); the production presets pair
+                    # persistent self-play with batch: 1024 (JOURNAL 2026-08-01)
 temperature: 1.0
 max_steps: 100000
 max_game_len: 800

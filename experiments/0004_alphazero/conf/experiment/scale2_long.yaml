@@ -12,8 +12,8 @@ net:
   layers: 4
 # scale2_long: scale2's shape (persistent
 # self-play, opening-temperature anneal, PCR) stretched to ~2500 iterations
-# (~14-16h with eval/arena overhead). Measured: self-play+train ~= 18-22s/iter at
-# scale2 (922 samples/s, 16384 samples/iter); the in-loop arena at
+# (~14-16h with eval/arena overhead). Measured at B=512: self-play+train
+# ~= 18-22s/iter at scale2 (922 samples/s, 16384 samples/iter); the in-loop arena at
 # arena/scale.yaml's games=128 (+az0 rung) costs ~590s/round.
 #
 # Arena budget: halve games (128 -> 64, ~590s -> ~295s/round) and halve the
@@ -26,7 +26,7 @@ n_iterations: 2500
 checkpoint_every: 50
 final_games: 400
 selfplay:
-  batch: 512
+  batch: 1024
   persistent: true
   checkpoint_pad: 512  # bounds the carry pad; clears the observed max pending (398 at B=512; settlrl-learn/CLAUDE.md)
   temperature_moves: 30

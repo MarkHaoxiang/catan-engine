@@ -25,7 +25,7 @@ net:
 n_iterations: 300
 checkpoint_every: 50
 selfplay:
-  batch: 512
+  batch: 1024
   persistent: true
   checkpoint_pad: 512  # bounds the carry pad; clears the observed max pending (398 at B=512; settlrl-learn/CLAUDE.md)
   temperature_moves: 30

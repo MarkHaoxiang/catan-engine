@@ -221,11 +221,11 @@ uses them.
     is audited on a final (trained-net) checkpoint; early-training games run
     longer, so an early-run kill-and-resume may truncate more lanes — each
     truncated lane still keeps its most recent `checkpoint_pad` rows, so the
-    cost stays bounded: divergence plus the dropped samples, never
-    corruption. A persistent
-    B=512 / 200k-item-buffer checkpoint writes **~4.4 GB in ~1.2 s**
-    (measured 2026-08-01, CPU, NVMe; before/after split in the exp 0004
-    JOURNAL line).
+    cost stays bounded: divergence plus the dropped samples, never corruption.
+    A persistent B=512 / 200k-item-buffer checkpoint writes **~4.4 GB in
+    ~1.2 s** (measured 2026-08-01, CPU, NVMe; before/after split in the exp
+    0004 JOURNAL line); the production presets run B=1024, roughly doubling
+    the carry share (~6.5 GB expected — re-audit the pending tail there).
     Transient: the loop frees each `to_padded` result after writing and drops
     the zero template once persistent, so steady-state host RAM is just the
     live pool; non-persistent pads to zero rows, 266 KiB. `save_run_state`

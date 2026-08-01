@@ -281,3 +281,23 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   **6.24 GB / 1.95 s → 4.43 GB / 1.18 s** per write (~0.40 GB from the bool
   dtypes, ~1.41 GB from the 800→512 pad). Pre-rev checkpoints fail to load
   with eqx's per-leaf dtype error — no migration.
+- 0004 selfplay batch 1024 adopted (2026-08-01). On the pinned hetero gauge
+  (bench_throughput_hetero config, B overridden on the CLI): **770.94 (B=512)
+  → 885.27 samples/s (B=1024), +14.8%**
+  (runs/0004_alphazero/2026-08-01T174013Z → .../2026-08-01T190106Z; the
+  repeat B=512 run 174739Z reads 757.4, so run noise ~±1.7% — the win is well
+  clear). Flips the 2026-07-28 sweep's "512 is the winner" verdict, which was
+  measured on a different recipe (gn_global v1, 64 sims, pre-setup-opener);
+  the pre-persistent 1024 loss was the discard artifact, gone since the lane
+  pool. Adopted in the seven production presets (scale2, scale2_long, v2_*,
+  gnn_hetero); the gn_global-trunk presets among them adopt by extrapolation
+  from the hetero measurement (batch-matched study arms) — no fresh gn_global
+  1024 bench. The frozen bench pins keep their own shapes (256/512 rulers).
+  Checkpoint arithmetic at B=1024: carry pad doubles → ~6.5 GB/write expected;
+  the pending-tail stats behind checkpoint_pad=512 were measured at B=512 and
+  should be re-audited on the first B=1024 final checkpoint (2× tail draws
+  put the expected max pending near ~450 vs the 512 bound — watch
+  `checkpoint_truncated_lanes`; pad 640 restores headroom if it fires).
+  Honest dynamics note: the +14.8% is throughput-only — a game now spans ~2×
+  the iterations, so flushed policy targets are up to ~2× staler in updates,
+  and the 8-iteration teacher warm-up covers under one median game per lane.

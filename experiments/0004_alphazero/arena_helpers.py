@@ -83,7 +83,8 @@ def run_final_gauntlet(
 
     Drops jax's compilation caches first, so no compiled program a caller built
     before this call survives it."""
-    # memory: the training loop's compiled programs (self-play at B=512, the
+    # memory: the training loop's compiled programs (self-play at the production
+    # batch, the
     # optimiser step, the in-loop arenas) stay loaded on the device via jax's jit
     # caches long after `learn` returned, and the gauntlet then compiles its own
     # (one per rung, plus two net-opponent searches). The clear costs a recompile

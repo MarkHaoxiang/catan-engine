@@ -13,13 +13,13 @@ net:
 # scale2 ~10h: small's shape with the throughput wave's levers on -- persistent
 # self-play (the lane pool; discard 72.8% -> ~0), an annealed opening
 # temperature, and playout-cap randomization (deep policy targets at a
-# fraction of the cost). batch=512 and the with-persistence bench numbers come
-# from the Step-0 re-sweep (JOURNAL 2026-07-28); PCR/anneal are training-lever
-# adoptions, not bench-measured.
+# fraction of the cost). batch=1024 wins the pinned hetero gauge (+14.8%,
+# JOURNAL 2026-08-01); PCR/anneal are training-lever adoptions, not
+# bench-measured.
 n_iterations: 300
 checkpoint_every: 50
 selfplay:
-  batch: 512
+  batch: 1024
   persistent: true
   checkpoint_pad: 512  # bounds the carry pad; clears the observed max pending (398 at B=512; settlrl-learn/CLAUDE.md)
   temperature_moves: 30
