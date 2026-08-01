@@ -4,347 +4,160 @@ One line per concluded experiment — number, verdict, the load-bearing fact.
 Full evidence lives in each experiment's `report.md`; raw outputs under
 `runs/` (git-ignored, regenerable from the manifest's commit + config).
 
-- 0001_bench_smoke — pass: greedy beats random 83.1% ± 4.7% (n=65, 2p);
-  infrastructure worked example.
-- 0002_linear_value_fitting — framework adopted, weights not (both targets):
-  predict reaches hand level vs greedy (75.2% vs 77.8%), maximise beats it
-  (80.8%), yet both lose head-to-head (~43%) — fixed-opponent optimization
-  breeds specialists. Held-out AUC flat while match probes span 53–78%:
-  select by matches, never fit metrics.
-- 0002_linear_value_fitting/self_play — pass: 3-round champion-ladder CEM
-  beat the hand-tuned weights 56.1% head-to-head (n=310, lower 2σ 50.5%) and
-  80.9% vs greedy (hand: 77.8%) — fixed-opponent specialists fixed by making
-  the opponent evolve; adoption of the weights deferred (leaf cascade).
-- 0002_linear_value_fitting/self_play at 4p — the 2p edge does not transfer:
-  27.0% ± 2.8% vs three hand lookaheads (chance 25%), 64.7% vs greedy tables
-  (hand: 68.1%); champion reproduced bit-identically from config (framework
-  determinism verified). Adoption now 2p-conditional or needs a mixed-count
-  arena.
-- 0002_linear_value_fitting/self_play_4p — near miss: the 4p-arena champion
-  reads 30.4% ± 3.2% vs three hand lookaheads (chance 25%, lower 2σ 24.0%,
-  n=230) and 69.3% vs greedy tables; 4p tuned slot stays hand-tuned pending
-  an n≈600 confirmation.
-- 0003_neural_board_architectures — pass (framework + first sweep, 12k
-  positions): a jraph GNN over the *raw* board nearly matches the hand-tuned
-  feature MLP — heuristic R² 0.978 vs 0.996, win AUC 0.825 vs 0.834 — while a
+- 0002_linear_value_fitting — framework adopted, weights not: fixed-opponent
+  optimization breeds specialists (both targets beat or match their objective
+  opponent yet lose ~43% head-to-head vs the hand-tuned lookahead); held-out
+  AUC flat while match probes span 53–78% — select by matches, never fit
+  metrics.
+- 0002_linear_value_fitting/self_play — pass at 2p: champion-ladder CEM beats
+  the hand-tuned weights 56.1% head-to-head (n=310, lower 2σ 50.5%) — evolving
+  the opponent fixes the specialist failure. The edge does not transfer to 4p
+  (27.0% ± 2.8% vs three hand lookaheads, chance 25%; the 4p-arena champion
+  reads 30.4% ± 3.2%, lower 2σ 24.0%) — the 4p tuned slot stays hand-tuned.
+- 0003_neural_board_architectures — pass (first sweep, 12k positions): a jraph
+  GNN over the *raw* board nearly matches the engineered-feature MLP
+  (heuristic R² 0.978 vs 0.996, win AUC 0.825 vs 0.834) while a
   structure-blind flat MLP on the same inputs is ≈chance (R² 0.54, AUC 0.52)
-  and DeepSet sits between. Structure is what makes raw board features usable;
-  a learnable leaf is within reach (settlrl-learn Stage 1 seam). Not yet
-  promoted: close the win gap, then gate lookahead(gnn) through bench.
-- 0003_neural_board_architectures — GraphNet lever ablation (2026-06-18, 20k
-  positions, +`road` structural target = seat-0 longest-road trail length). On
-  `road` the GNNs hit R² 0.99 vs the engineered MLP's 0.83 (replicated seed 1:
-  eng 0.835, plain-MPNN 0.986) — the graph recovers a connectivity quantity the
-  hand-tuned vector lacks. **Attention is the wrong bias for counting/structural
-  tasks**: `gn_gat` collapses to 0.86 on `road` (sum-MPNN 0.99) while leading on
-  the global `win` target (0.77) — the target's locality picks the architecture.
-  GraphNorm and jumping-knowledge don't pay on a 54-node graph. Every preset is
-  board-symmetry + player-relabel invariant (no absolute PE). Recommended net:
-  `gn_global` (sum-MPNN + virtual global node + multi-aggregator readout +
-  LayerNorm; no attention/GraphNorm/JK) — the robust all-rounder for the AZ
-  value+policy net.
-- 0003 multi-task + road-reasoning probe (2026-06-18). Multi-task (shared trunk,
-  head per target win+heur+road+turns): negative transfer onto the structural
-  `road` head (gn_global 0.98→0.82) while easy heads hold; plain `gn_base` is the
-  most robust trunk and its win head *improves* (0.738→0.766) from the structural
-  auxiliary — a single AZ value+policy trunk wants sum-MPNN + loss-balancing.
-  Road probe (`road_probe.py`, controlled paths/branchy/broken mix): the GNN is
-  not edge-counting (on |count-longest|≥2 cases it predicts true longest 7.2 not
-  count 11.1) but is depth-limited as expected — 1 layer fails (R² 0.58), depth 2
-  →0.92, then plateaus; greedy road 0.99 was an easy near-simple-path artefact.
-- 0004 bench_throughput baseline (2026-07-28). Pinned self-play throughput at
-  the frozen az0 net (overnight shape: B=256, 64 sims): 193 samples/s
-  (741 moves/s, 47438 sims/s), 72.8% of searched positions discarded at the
-  iteration boundary — the optimization track's before number (run
-  runs/0004_alphazero/2026-07-28T065337Z, commit 2811210).
-- 0004 bench_throughput batch sweep (2026-07-28, measurement only, no config
-  adopted). B=256 re-run reproduces the frozen baseline (193.81 vs 193.07
-  samples/s, +0.4%, ruler holds). B=512 and B=1024 both *regress*, opposite
-  the design-phase synthetic-replica prediction of a 1.6x per-lane win:
-  193.81 (256) > 166.39 (512) > 120.15 (1024) samples/s, with discard
-  fraction climbing 72.7%→84.5%→91.0% — larger batch means more
-  lockstep-truncation waste, not less. No OOM at any size; peak GPU memory
-  is ~flat at 25.3-25.4GiB (78% of 32GB) across all three, which is JAX's
-  preallocated pool, not a per-batch signal. Winner: B=256, the current
-  default — batch-size increase does not pay off at this anchor (64 sims).
-  Runs: runs/0004_alphazero/2026-07-28T103722Z (256),
-  runs/0004_alphazero/2026-07-28T104353Z (512),
-  runs/0004_alphazero/2026-07-28T105136Z (1024).
-- 0004 throughput wave verdict: persistent self-play adopted (2026-07-28).
-  `selfplay.persistent` (the lane pool) reruns the batch sweep with the
-  discard term actually gone, and it flips the earlier verdict: baseline
-  193.07 samples/s (B=256, non-persistent, 72.8% discarded) →
-  persistent@256 482.42 samples/s (2.50x, the lane pool's isolated
-  contribution — same batch, discard 72.8%→0.0%) →
-  persistent@512 **922.53 samples/s (4.78x compounded)**, discard 0.0%
-  — the batch lever now pays off once the iteration-boundary waste is gone,
-  matching the design-phase prediction the non-persistent sweep falsified.
-  persistent@1024 regresses off that peak (834.76 samples/s, still
-  discard 0.0%) — B=512 is the sweep winner. Adopted into
-  `conf/experiment/scale2.yaml` (small's shape: gnn 96x4, teacher
-  warm-start, Canopy q-blend): `selfplay.batch=512`, `persistent=true`,
-  `temperature_moves=30` (untuned starting value), playout-cap
-  randomization on (`pcr_full_prob=0.25`, `pcr_fast_sims=16`,
-  `search.num_simulations=128` for the full steps) — PCR/anneal are
-  training-lever adoptions, not bench-measured (bench mode keeps PCR off,
-  sims=64, per Step 2). An 8-iteration validation run
-  (`+experiment=scale2 n_iterations=8 arena.every=4 wandb.mode=disabled`,
-  runs/0004_alphazero/2026-07-28T233122Z) confirms `selfplay_discarded`
-  is 0.0 at every iteration (not just from iter 2 on), losses drop
-  2.29→~1.2 with no NaNs, policy entropy stays alive (0.46-0.52, no
-  collapse), and per-iteration self-play throughput (steady-state
-  ~850-1775 samples/s across a live, still-cold net) is order-of-magnitude
-  consistent with the frozen-net bench number. Checkpoint+resume smoke
-  (`checkpoint_every=4`, killed after iteration 4's checkpoint —
-  runs/0004_alphazero/2026-07-28T234523Z — then `resume_from`'d into
-  runs/0004_alphazero/2026-07-28T235055Z) resumes cleanly at iteration 4/8
-  and completes iterations 5-8 with no errors, matching losses. Sweep
-  runs: runs/0004_alphazero/2026-07-28T230720Z (persistent@256),
-  runs/0004_alphazero/2026-07-28T231144Z (persistent@512, winner),
-  runs/0004_alphazero/2026-07-28T231545Z (persistent@1024). Parallel-descent
-  search work (K-way SH blocks, virtual loss) stays out of scope until a
-  scale2-based long run re-tests the plateau.
-- 0004 fused-leaf seam fix — GPU-throughput-neutral, structural value only
-  (2026-07-30). The seam fix (1b442ec/ce8b376) makes a `ValuePrior` serve one
-  net forward per leaf instead of two, motivated by a CPU HLO dot census
-  (bisected 2026-07-30) that found XLA does not merge the duplicate forward on
-  CPU and predicted a ~20-26% self-play throughput win. A GPU confirmation
-  bench at the pinned config (B=256 non-persistent) found none:
-  194.91 vs the frozen 193.81 samples/s baseline, +0.6% — noise, well under
-  the 10% sanity gate (runs/0004_alphazero/2026-07-30T093739Z vs
-  runs/0004_alphazero/2026-07-28T103722Z). Resolution: GPU XLA already
-  common-subexpression-eliminates the duplicate forward (2026-07-27 GPU HLO
-  measurement: identical HLO, 441 dots, wall 1.03) — the CPU non-merging
-  finding was CPU-specific, and the CPU examiner's report had explicitly
-  flagged this exact risk. The fix stays: it guarantees a single forward *by
-  construction* rather than by luck of the compiler, is bit-exact with the
-  unfused path, and is pinned by a regression test
-  (`settlrl-learn/tests/test_leaf_seam.py`) so the duplication cannot come
-  back silently — the value is structural (correctness + halved CPU op
-  emission), not a self-play speedup. Docs corrected in the same commit
-  (`packages/settlrl-search/CLAUDE.md`, `packages/settlrl-learn/CLAUDE.md`):
-  the CPU MFLOP/dot-count numbers are now flagged as CPU-only, not GPU
-  wall-clock. Persistent@512 bench and the search_step_ms micro-checks were
-  skipped (nothing further to confirm once the primary gate failed to clear).
+  — structure is what makes raw board features usable.
+- 0003 GraphNet lever ablation (2026-06-18, 20k positions): GNNs recover the
+  structural `road` target the engineered vector lacks (R² 0.99 vs 0.83);
+  attention is the wrong bias for counting/structural tasks (`gn_gat` 0.86 on
+  `road` vs sum-MPNN 0.99); GraphNorm and jumping-knowledge don't pay on a
+  54-node graph. Winner: `gn_global` (sum-MPNN + virtual global node +
+  multi-aggregator readout + LayerNorm).
+- 0003 multi-task + road probe (2026-06-18): shared-trunk multi-task shows
+  negative transfer onto the structural `road` head (gn_global 0.98→0.82) —
+  a single AZ value+policy trunk wants sum-MPNN + loss-balancing. Road probe:
+  the GNN is not edge-counting but is depth-limited (1 layer fails R² 0.58,
+  depth 2 → 0.92, then plateaus).
+- 0004 bench_throughput baseline (2026-07-28) — pinned self-play throughput at
+  the frozen az0 net (B=256, 64 sims): **193 samples/s** (741 moves/s, 72.8%
+  of searched positions discarded at the iteration boundary) — the gn_global
+  track's before number. Run runs/0004_alphazero/2026-07-28T065337Z,
+  commit 2811210.
+- 0004 persistent self-play adopted (2026-07-28): the lane pool removes the
+  iteration-boundary discard entirely. 193.07 samples/s (B=256
+  non-persistent, 72.8% discarded) → persistent@256 482.42 (2.50x, discard
+  0.0%) → **persistent@512 922.53 (4.78x, sweep winner)**; persistent@1024
+  regresses (834.76). Non-persistent B-scaling had regressed instead
+  (193.8 → 166.4 → 120.2 samples/s at 256/512/1024, discard climbing to 91%)
+  — a discard artifact, not a batch ceiling. Adopted in
+  `conf/experiment/scale2.yaml`: `selfplay.batch=512`, `persistent=true`,
+  `temperature_moves=30`, playout-cap randomization (`pcr_full_prob=0.25`,
+  `pcr_fast_sims=16`, sims=128 full) — PCR/anneal are training-lever
+  adoptions, not bench-measured (bench mode keeps PCR off, sims=64).
+- 0004 fused-leaf seam fix (2026-07-30) — GPU-throughput-neutral: 194.91 vs
+  193.81 samples/s (+0.6%, noise). GPU XLA already common-subexpression-
+  eliminates the duplicate leaf forward; the CPU dot-census win that
+  motivated the fix was CPU-specific. The fix stays for the structural
+  single-forward-by-construction guarantee, pinned by
+  `settlrl-learn/tests/test_leaf_seam.py`.
 - 0001_bench_smoke/calibrate — pass, one-off anchor-scale reset (2026-07-29):
-  a joint Elo MLE (coordinate-ascent Bradley-Terry, `calibrate.py::joint_fit`)
-  over the complete round-robin {random, greedy, lookahead, mcts, az0_gnn96x4}
-  (10 unordered pairs, seat-swapped 2p, n=4238 games total; lookahead pinned
-  at 0). Fitted: random −1115 ± 71, greedy −231 ± 12, mcts +38 ± 12,
-  az0_gnn96x4 −58 ± 12 (Fisher SE). All four sanity gates held (lookahead = 0
-  by construction; greedy in [−480, −180]; random < −600; az0 in (−400, 0)).
-  Old → new: `arena.anchor_elos.random` −800.0 → −1115.0
-  (`conf/arena/default.yaml` + `conf/arena/scale.yaml`); az0_gnn96x4's
-  `net_opponents` elo (provisional, from its 0.361 winrate vs lookahead
-  alone) −100.0 → −58.0 (`conf/arena/scale.yaml`). **Historical-shift
-  caveat**: every past `arena_elo` reading (every 0004 run to date) was on
-  the old −800 scale and is not comparable at face value to a run using
-  these anchors — the *relative* ordering of checkpoints within one run is
-  unaffected, only the absolute number's meaning shifts. **Semantics scope**:
-  the calibration is valid only for arena/search settings matching
-  `conf/arena/scale.yaml` (sims=24, considered=16) + `conf/search/scale.yaml`
-  (chance_nodes=false, dev_chance=true, ordered=false) — recorded verbatim in
-  the run's `result.json` (`search_semantics`) alongside the fitted ratings
-  and matrix — plus az0_gnn96x4's setup opener (`setup_depth=1`,
-  `setup_temperature=2.0`, `setup_beam=4`, GNNBackend's own defaults): pinned
-  as constants (`0004_alphazero/run.py::NET_OPPONENT_SETUP_*`,
-  `0001_bench_smoke/calibrate.py::AZ0_SETUP_*`) rather than read off a run's
-  `cfg.net.setup_*`, so a frozen anchor keeps frozen semantics regardless of
-  what any given run configures for its own net. A differently-configured
-  arena (different sims/considered, chance_nodes/
-  dev_chance/ordered flipped, or a different az0 setup opener) needs its own
-  calibration; these anchors should not be reused there. Run:
-  runs/0001_bench_smoke/2026-07-29T034807Z.
-- 0004 scale2_long — **pass, first Stage-1 gate clear** (2026-07-30). The
-  scale2 recipe (persistent lanes, `selfplay.batch=512`, PCR
-  `pcr_full_prob=0.25`/`pcr_fast_sims=16`, `temperature_moves=30` anneal, gnn
-  96x4, v1 features) run to 2500 iterations, bit-exactly resumed at iteration
-  1710 across two segments — runs/0004_alphazero/2026-07-29T122854Z (iters
-  0-1710, git 57a4e08) and runs/0004_alphazero/2026-07-30T094945Z
-  (`resume_from` the first dir, iters 1710-2500, git 57a4e08) — clears the
-  gate: final gauntlet `arena_elo` 109.857 ± 12.867 SE (lower bound +84.1
-  vs. the +35 gate), `arena_winrate` 0.6264 vs. lookahead (gate 0.55), 1.0
-  vs. random, 0.7530 vs. the frozen az0 anchor, `best_arena_winrate` 0.6694
-  (400-game final_games gauntlet, `runs/.../result.json`). Periodic in-loop
-  `arena_elo` trajectory across both segments: −211.8 @ iter 149 →
-  −75.4 @ 299 → −61.7 @ 449 → +19.1 @ 599 → +57.7 @ 899 → +76.5 @ 1349 →
-  +107.6 @ 1649 → +121.7 @ 1799 → +113.6 @ 1949 → +130.9 @ 2099 →
-  +99.3 @ 2399 → +109.857 (final gauntlet). **Falsifies the earlier
-  "plateau" reading**: the throughput-wave verdict (above) left the
-  plateau question open for "a scale2-based long run" to re-test; this run
-  is that re-test, and the net climbs ~340 Elo points from its iter-149
-  trough to the final gate pass with no sign of saturating — the earlier
-  short runs read a still-cold net, not a ceiling. Under-scaling, not a
-  leaf/value ceiling, was the cause. Anchor minted: `az1_gnn96x4`
-  (feature_version=1, gauntlet elo 109.86 ± 12.87) added as an arena rung
-  in `conf/arena/scale.yaml`.
-- 0004 four-arm architecture study — **hetero passes, sole gate clear
-  (2026-07-30)**. Isolation test of three levers on top of the scale2 recipe
-  at v1's matched 300 iterations, each arm judged by its own 400-game final
-  gauntlet against the `+35`/0.55 gate (`conf/experiment/v2_{base,incidence,
-  hetero,deep}.yaml`): `v2_base` (v1 + v2 featurization only — Task 1/2's
-  global repairs + [max,sum,std]/LayerNorm readout, `gn_global` trunk) 33.914
-  ± 9.864 Elo, fail — runs/0004_alphazero/2026-07-30T142232Z (training, died
-  `CUDA_ERROR_OUT_OF_MEMORY` in the final gauntlet after completing all 300
-  iterations; fixed by a5bda5b, which clears jax's compilation caches before
-  the gauntlet compiles its own) + runs/0004_alphazero/2026-07-30T161824Z
-  (`resume_from` the first dir at the fix commit, gauntlet only). `v2_incidence`
-  (+ per-vertex incident-hex identity features, no new message passing) 40.862
-  ± 9.670, fail — runs/0004_alphazero/2026-07-30T165116Z. `v2_deep` (+2 more
-  GNN layers, 4→6, more reach/capacity over the same information) 35.728 ±
-  9.820, fail — runs/0004_alphazero/2026-07-30T222151Z. `v2_hetero` (`gn_global`
-  swapped for `gn_hetero` — hexes promoted to first-class nodes, vertex↔hex
-  message passing each layer) **76.171 ± 9.815, pass** — the first 300-iteration
-  gate clear ever, 46.5% vs the `az1_gnn96x4` anchor —
-  runs/0004_alphazero/2026-07-30T192420Z. Reading: `v2_base`/`v2_incidence`/
-  `v2_deep` are statistically indistinguishable (33.9–40.9, overlapping ±9.7–9.9
-  SE bands) — neither more reach (`v2_deep`) nor identity-as-features
-  (`v2_incidence`) moves the needle over the plain `v2_base` control — while
-  `v2_hetero` clears every control by ~3σ. The win is the hex-node
-  star-expansion **structure** itself, not reach and not raw information
-  content. Context: v2 featurization is worth ~+110 Elo over v1 at matched
-  300-iteration compute (v1's scale2_long in-loop reading at iter 299 was
-  −75.4; `v2_base`'s final gauntlet is +33.9). `v2_hetero`'s HNHN degree
-  normalization (the alpha/beta parameterization on the vertex↔hex
-  aggregation) is not implemented — this arm is plain `v2_base` + `gn_hetero`
-  with a segment-sum aggregation; degree norm stays a follow-up. A long
-  `v2_hetero` run (2500 iterations, matching scale2_long's budget) is
-  in-flight: runs/0004_alphazero/2026-07-31T010419Z.
-- 0004 `v2_hetero` long run — **second gate pass, az2 minted (2026-07-31)**.
-  The study's follow-up at scale2_long's full budget: `+experiment=v2_hetero
-  n_iterations=2500 checkpoint_every=10`, bit-exactly resumed at iteration
-  980 across runs/0004_alphazero/2026-07-31T010419Z (iters 0–980, git
-  a5bda5b) and runs/0004_alphazero/2026-07-31T073531Z (`resume_from` the
-  first dir, iters 980–2500, git c225a14; the pause was a host restart, not a
-  crash). Final 400-game gauntlet: `arena_elo` **186.759 ± 10.877** SE (lower
-  bound +165.0 vs. the +35 gate), 0.7403 vs. lookahead, 0.6014 vs. the
-  frozen az1 anchor, 0.8180 vs. az0, 1.0 vs. random, `best_arena_winrate`
-  0.8070 (`runs/.../result.json`). In-loop trajectory across both segments:
-  +0.6 @ 149 → +44.6 @ 299 → +117.4 @ 449 → +168.2 @ 749 → +206.7 @ 1049 →
-  +232.2 @ 1349 → +240.5 @ 1799 → +257.3 @ 2099 → +250.9 @ 2399 → +186.76
-  (final gauntlet; the 64-game in-loop reads carry ±22–24 SE and select the
-  round's `best.eqx`, so the tighter gauntlet number is the citable one).
-  Reading: the hypergraph advantage **compounds with compute** — v2_hetero
-  reaches v1 scale2_long's final +110 level by iteration ~449 (v1 needed
-  2500) and finishes +77 Elo above it at matched budget; it cleared +0.6 at
-  iter 149 where v1 sat at −211.8. Anchor minted: `az2_hetero96x4`
-  (`gn_hetero`, feature_version=2, gauntlet elo 186.76 ± 10.88) added as an
-  arena rung in `conf/arena/scale.yaml` — the ladder is now az0 −58 / az1
-  +109.86 / az2 +186.76.
-- 0003 `guard` — **az2-distillation architecture guard calibrated on the known
-  pair (2026-08-01)**. New doctrine (Mark): architecture decisions route
-  through a supervised guard — train the production net (trunk under test)
-  with the production loss on a frozen az2-self-play dataset (improved policy
-  + root q + outcome; train/val from independently seeded generations) — not
-  through short RL runs; 300-iteration RL screens are retired (their absolute
-  +35 gate mislabeled controls that a full-budget run of the same class
-  passes, and short horizons conflate early trainability with asymptotic
-  quality). A guard pass earns a full 2500-iteration run judged by the
-  gauntlet gate. Calibration (`guard` variant, 3 seeds/arch, 50k train / 10k
-  val positions at sims=64, runs/0003_neural_board_architectures/
-  2026-08-01T094430Z): `gn_hetero` beats `gn_global` with zero seed overlap
-  on every primary metric — best val policy KL **0.0851 vs 0.1089** (spread
-  ~0.003 both; gap ≈ 6× spread), top-1 agree 91.8% vs 90.4%, value MSE(z)
-  0.103 vs 0.126 — reproducing the RL-loop ground truth (four-arm study +
-  az2 gate pass) in ~20 GPU-min vs ~8 GPU-h. Caveats: the teacher is itself
-  `gn_hetero` (teacher–student architecture match may inflate the hetero
-  edge), and this is one calibration pair, not a validation set.
-- 0004 bench_throughput_hetero baseline minted (2026-08-01). Pinned self-play
-  throughput for the adopted hetero recipe (az2_hetero96x4 anchor, v2 training
-  shape: persistent pool, B=512, 128 sims, no PCR — bench_selfplay rejects the
-  PCR mix): **675.36 samples/s** (475.32 moves/s, 60841 sims/s, discard 0,
-  RTX 5090; run runs/0004_alphazero/2026-08-01T154603Z) — the hetero track's
-  before number. The gn_global pin (bench_throughput, az0, B=256/64 sims)
-  stays valid for its own recipe.
-- 0004 setup-row-restricted opener adopted (2026-08-01, d11b50e). The setup
-  policy sweeps the 126 setup rows instead of all 662 through `apply_action`
-  (bit-identical moves and RNG stream; lockstep contract test): pinned
-  hetero gauge 675.36 → **770.94 samples/s (+14.2%)**
-  (runs/0004_alphazero/2026-08-01T154603Z → .../2026-08-01T174013Z); the
-  sims=16 fast arm ~2.7k → ~5.3k samples/s (fast steps are where the setup
-  sweep dominated).
-- 0004 backup scatter-add rejected (2026-08-01). Batching the ISMCTS
-  `_backup` per-depth point scatters into one `.at[].add` is bit-exact on
-  CPU (proved + probed) but not on CUDA: the multi-element scatter lowers
-  through `atomicAdd(float)`, which flushes subnormal f32 updates to +0.0
-  (divergence demonstrated at |v| < 1.1754944e-38; the serial form preserves
-  the bits), and the measured GPU search-step win was noise-level
-  (326.3 → 324.0 ms B=64, 930.2 → 928.1 ms B=256). Bit-exactness bar +
-  neutral win → not landed (change recoverable from the session stash).
-- learn checkpoint slimming, format rev (2026-08-01). Replay items store
-  `mask`/`train_policy` as bool (losses cast at use; loss/grads byte-exact on
-  CPU, pinned test) and `selfplay.checkpoint_pad` bounds the persistent-carry
-  pad (scale presets set 512, clearing the measured pending tail: median 88 /
-  p99 272 / max 398 rows at the v2_hetero final ckpt, B=512; over-bound lanes
-  keep their tail and the loop logs `checkpoint_truncated_lanes`/`_rows`).
-  Save bench at the production shape (B=512, 200k buffer, CPU, NVMe):
-  **6.24 GB / 1.95 s → 4.43 GB / 1.18 s** per write (~0.40 GB from the bool
-  dtypes, ~1.41 GB from the 800→512 pad). Pre-rev checkpoints fail to load
-  with eqx's per-leaf dtype error — no migration.
-- 0004 selfplay batch 1024 adopted (2026-08-01). On the pinned hetero gauge
-  (bench_throughput_hetero config, B overridden on the CLI): **770.94 (B=512)
-  → 885.27 samples/s (B=1024), +14.8%**
-  (runs/0004_alphazero/2026-08-01T174013Z → .../2026-08-01T190106Z; the
-  repeat B=512 run 174739Z reads 757.4, so run noise ~±1.7% — the win is well
-  clear). Flips the 2026-07-28 sweep's "512 is the winner" verdict, which was
-  measured on a different recipe (gn_global v1, 64 sims, pre-setup-opener);
-  the pre-persistent 1024 loss was the discard artifact, gone since the lane
-  pool. Adopted in the seven production presets (scale2, scale2_long, v2_*,
-  gnn_hetero); the gn_global-trunk presets among them adopt by extrapolation
-  from the hetero measurement (batch-matched study arms) — no fresh gn_global
-  1024 bench. The frozen bench pins keep their own shapes (256/512 rulers).
-  Checkpoint arithmetic at B=1024: carry pad doubles → ~6.5 GB/write expected;
-  the pending-tail stats behind checkpoint_pad=512 were measured at B=512 and
-  should be re-audited on the first B=1024 final checkpoint (2× tail draws
-  put the expected max pending near ~450 vs the 512 bound — watch
-  `checkpoint_truncated_lanes`; pad 640 restores headroom if it fires).
-  Honest dynamics note: the +14.8% is throughput-only — a game now spans ~2×
-  the iterations, so flushed policy targets are up to ~2× staler in updates,
-  and the 8-iteration teacher warm-up covers under one median game per lane.
+  joint Elo MLE (`calibrate.py::joint_fit`, coordinate-ascent Bradley-Terry)
+  over the full round-robin {random, greedy, lookahead, mcts, az0_gnn96x4},
+  n=4238, lookahead pinned at 0. Fitted: random **−1115 ± 71**, greedy
+  −231 ± 12, mcts +38 ± 12, az0_gnn96x4 **−58 ± 12** (Fisher SE); adopted
+  into `conf/arena/*.yaml` (random −800 → −1115, az0 −100 → −58). Valid only
+  for `conf/arena/scale.yaml` + `conf/search/scale.yaml` semantics plus the
+  pinned az0 setup-opener constants; pre-calibration `arena_elo` readings are
+  not face-comparable. Run runs/0001_bench_smoke/2026-07-29T034807Z.
+- 0004 scale2_long — **pass, first Stage-1 gate clear (2026-07-30)**: the
+  scale2 recipe (gn_global 96x4, v1 features) at 2500 iterations, bit-exact
+  resume across runs/0004_alphazero/2026-07-29T122854Z +
+  .../2026-07-30T094945Z. Final 400-game gauntlet: `arena_elo`
+  **109.857 ± 12.867** SE (lower bound +84.1 vs the +35 gate), 0.6264 vs
+  lookahead, 0.7530 vs az0, 1.0 vs random. Falsifies the earlier plateau
+  reading — the net climbs ~340 Elo from its iter-149 trough with no
+  saturation; under-scaling, not a leaf/value ceiling, was the cause. Anchor
+  minted: `az1_gnn96x4` (feature_version=1, elo 109.86 ± 12.87).
+- 0004 four-arm architecture study — hetero passes, sole gate clear
+  (2026-07-30) at matched 300 iterations: `v2_hetero` (hexes promoted to
+  first-class nodes, vertex↔hex message passing) **76.171 ± 9.815**, pass —
+  the controls `v2_base` / `v2_incidence` / `v2_deep` fail indistinguishably
+  (33.9–40.9, overlapping ±9.7–9.9 SE) — the win is the hex-node
+  star-expansion structure itself, not reach (deep) and not information
+  content (incidence). v2 featurization alone is worth ~+110 Elo over v1 at
+  matched compute.
+- 0004 v2_hetero long run — **second gate pass, az2 minted (2026-07-31)**:
+  full 2500-iteration budget, bit-exact resume across
+  runs/0004_alphazero/2026-07-31T010419Z + .../2026-07-31T073531Z. Final
+  400-game gauntlet: `arena_elo` **186.759 ± 10.877** SE (lower bound
+  +165.0), 0.7403 vs lookahead, 0.6014 vs az1, 0.8180 vs az0. The hypergraph
+  advantage compounds with compute — v2_hetero reaches v1's final +110 level
+  by iteration ~449. Anchor minted: `az2_hetero96x4` — the ladder is
+  az0 −58 / az1 +109.86 / az2 +186.76.
+- 0003 guard — az2-distillation architecture guard calibrated (2026-08-01).
+  Doctrine: architecture decisions gate through the supervised guard (train
+  the production net on frozen az2 self-play targets), never short RL runs —
+  300-iteration RL screens are retired; a guard pass earns a full
+  2500-iteration run judged by the gauntlet gate. Calibration (3 seeds/arch,
+  50k train / 10k val positions at sims=64): `gn_hetero` beats `gn_global`
+  with zero seed overlap — best val policy KL **0.0851 vs 0.1089**, top-1
+  agree 91.8% vs 90.4%, value MSE(z) 0.103 vs 0.126 — reproducing the
+  RL-loop ground truth in ~20 GPU-min vs ~8 GPU-h. Caveat: the teacher is
+  itself `gn_hetero`. Run
+  runs/0003_neural_board_architectures/2026-08-01T094430Z.
+- 0004 bench_throughput_hetero baseline minted (2026-08-01) — pinned
+  self-play throughput for the adopted hetero recipe (az2_hetero96x4 anchor,
+  persistent pool, B=512, 128 sims, no PCR): **675.36 samples/s** (discard 0,
+  RTX 5090) — the hetero track's before number. Run
+  runs/0004_alphazero/2026-08-01T154603Z. The gn_global pin (az0, B=256/64
+  sims) stays valid for its own recipe.
+- 0004 setup-row-restricted opener adopted (2026-08-01, d11b50e): the setup
+  policy sweeps the 126 setup rows instead of all 662 (bit-identical moves
+  and RNG stream, lockstep contract test): pinned hetero gauge 675.36 →
+  **770.94 samples/s (+14.2%)** (runs/0004_alphazero/2026-08-01T154603Z →
+  .../2026-08-01T174013Z).
+- 0004 backup scatter-add rejected (2026-08-01): batching the ISMCTS
+  `_backup` scatters into one `.at[].add` is bit-exact on CPU but not CUDA —
+  the scatter lowers through `atomicAdd(float)`, which flushes subnormal f32
+  updates to +0.0 (divergence at |v| < 1.1754944e-38) — and the GPU
+  search-step win was noise (326.3 → 324.0 ms B=64). Bit-exactness bar +
+  neutral win → not landed.
+- learn checkpoint slimming, format rev (2026-08-01): replay
+  `mask`/`train_policy` stored bool (losses byte-exact on CPU, pinned test)
+  and `selfplay.checkpoint_pad` bounds the persistent-carry pad (scale
+  presets 512; measured pending tail median 88 / p99 272 / max 398 at B=512;
+  over-bound lanes log `checkpoint_truncated_lanes`/`_rows`). Save bench at
+  the production shape: **6.24 GB / 1.95 s → 4.43 GB / 1.18 s** per write
+  (~0.40 GB from the bool dtypes, ~1.41 GB from the 800→512 pad). Pre-rev
+  checkpoints fail to load — no migration.
+- 0004 selfplay batch 1024 adopted (2026-08-01): pinned hetero gauge
+  **770.94 (B=512) → 885.27 samples/s (B=1024), +14.8%** (run noise ~±1.7%,
+  the win is well clear). Flips the 2026-07-28 "512 is the winner" verdict —
+  that was a different recipe (gn_global v1, 64 sims, pre-setup-opener), and
+  the pre-persistent 1024 loss was the discard artifact. Adopted in the
+  seven production presets (gn_global trunks by extrapolation); the frozen
+  bench pins keep their own shapes. Throughput-only: a game now spans ~2×
+  the iterations, so flushed policy targets are up to ~2× staler; carry pad
+  doubles (~6.5 GB/write expected — watch `checkpoint_truncated_lanes` on
+  the first B=1024 final checkpoint, pad 640 restores headroom).
 - Root-legality reuse adopted unconditionally (2026-08-01): the search takes
   the caller's env root mask as every determinization's root legal set and
-  peels the descent's depth-0 step — no flag, no per-world root sweep. Bit-
-  identity to the per-world-sweep root verified pre-deletion: exhaustive
-  availability classification, an 8,400-root probe with 0 differing bits,
-  move-for-move CPU bit-identity over real games (both descent machines,
-  2p + 3p). GPU search-step micro: 324.6→316.5 ms at B=64 / 930.3→921.1 ms
-  at B=256 (~1–2.5%).
+  peels the descent's depth-0 step — no flag, no per-world root sweep.
+  Bit-identity verified pre-deletion (8,400-root probe with 0 differing
+  bits; move-for-move CPU bit-identity over real games, 2p + 3p). GPU
+  search-step micro: 324.6→316.5 ms B=64, 930.3→921.1 ms B=256 (~1–2.5%).
 - blocked_linear landed (2026-08-01): `GraphNetConfig.blocked_linear`
-  weight-blocks the message/update MLPs' first Linears (one matmul per unique
-  input row, gathered) — default off, no adopter yet. GPU micros (scratchpad
-  harness, NOT the pinned bench_throughput gate): hetero-v2 96x4 forward
-  B=512 4.6→2.8 ms (−38%); production-semantics search step B=512/sims=128
-  968→854 ms (−12%); two runs each. Same weights, same function up to float
-  summation order (float64 identity residual 7.1e-15), NOT bit-exact across
-  a flag flip — new runs only. Adoption + a pinned-gate quote deferred to
-  the next architecture-study run that threads the flag.
-- blocked linears adopted unconditionally, flag deleted (2026-08-01). The
-  float64 reassociation residual (7.1e-15) proves blocked and unblocked are
-  the same function up to float summation order with identical parameters,
-  so per the no-dead-code guideline (root CLAUDE.md) the old form goes
-  rather than gaining a flag: the
-  gather-then-transform path and `GraphNetConfig.blocked_linear` are deleted,
-  weight-blocked first Linears are the only formulation, and every
-  checkpoint/anchor loads unchanged (the blocked matmuls slice the same
-  Linear weights). Pinned hetero gauge (bench_throughput_hetero, B=512
-  ruler, bench.repeats=2): 770.94 → **911.72 samples/s (+18.3%)**
+  weight-blocks the message/update MLPs' first Linears (one matmul per
+  unique input row, gathered). GPU micros (scratchpad harness, NOT the
+  pinned gate): hetero-v2 forward B=512 4.6→2.8 ms (−38%), search step
+  B=512/sims=128 968→854 ms (−12%). Same function up to float summation
+  order (float64 identity residual 7.1e-15), not bit-exact.
+- blocked linears adopted unconditionally, flag deleted (2026-08-01): the
+  reassociation-identity proof means the old form is dead code, so
+  weight-blocked first Linears are the only formulation. Pinned hetero gauge
+  (B=512 ruler): 770.94 → **911.72 samples/s (+18.3%)**
   (runs/0004_alphazero/2026-08-01T174013Z → .../2026-08-01T205749Z; run
-  noise ~±1.7% per the 174739Z repeat, so the win is far clear). GNN forward
-  bits shift at float32 rounding level everywhere (self-play, arena, anchor
-  evaluations) — accepted; a resume across the boundary diverges like any
-  reassociation. `tests/test_blocked_linear.py`'s flag comparison is
-  reworked as `tests/test_message_linears.py`: the proof now pins against
-  an in-test naive gather-concat-transform reference over the same modules
-  (float32 closeness on a real board, float64 identity ≤ 1e-12, parameter
-  identity via the un-sliced weight).
-- 0003 guard_dnorm — fail (2026-08-01). HNHN-style degree normalization of
-  the hetero incidence aggregates (`gn_hetero_dnorm`: divide each
-  vertex<->hex sum by receiver incidence degree) vs `gn_hetero` on the
-  frozen az2 distill targets, 3 seeds each (v2 dataset generated at
-  `_DISTILL_SCHEMA=2`: 50,203 train / 10,227 val, ~3.6 GPU-min, now
-  cached). best_policy_kl challenger worst 0.09054 vs incumbent best
-  0.08097 (means 0.08590 vs 0.08191, challenger seed spread 4x); top-1 tie,
-  value MSE uniformly worse. `distill_verdict` = fail — no full-budget run.
-  Consistent with per-node LayerNorm already absorbing degree-dependent
-  scale. Runs 2026-08-01T214259Z / 214625Z; the lever stays as a
+  noise ~±1.7%). The blocked matmuls slice the same Linear weights, so every
+  checkpoint/anchor loads unchanged; forward bits shift at float32 rounding
+  level, so a resume across the boundary diverges. Proof pinned by
+  `tests/test_message_linears.py` against a naive gather-concat-transform
+  reference (float64 identity ≤ 1e-12, parameter identity).
+- 0003 guard_dnorm — fail (2026-08-01): HNHN-style degree normalization of
+  the hetero incidence aggregates (`gn_hetero_dnorm`) vs `gn_hetero` on the
+  frozen az2 distill targets, 3 seeds each: challenger worst best_policy_kl
+  0.09054 vs incumbent best 0.08097, top-1 tie, value MSE uniformly worse →
+  `distill_verdict` fail, no full-budget run. Consistent with per-node
+  LayerNorm already absorbing degree-dependent scale; the lever stays a
   `GraphNetConfig` ablation knob (default off, off-path byte-identical).
