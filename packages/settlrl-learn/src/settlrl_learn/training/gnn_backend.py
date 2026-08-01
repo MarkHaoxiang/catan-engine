@@ -22,7 +22,7 @@ from settlrl_engine.board.state import BoardState, IntScalar
 from settlrl_engine.env import N_FLAT
 from settlrl_engine.mechanics.action import ActionType
 from settlrl_search import make_search
-from settlrl_search.expectimax import make_setup_search
+from settlrl_search.expectimax import make_setup_lookahead, make_setup_search
 from settlrl_search.policy import BeliefPolicy, PolicyPrior
 from settlrl_search.rows import ROW_TYPE as _ROW_TYPE
 
@@ -52,14 +52,15 @@ def setup_policy(
     setup_beam: int = 4,
 ) -> BeliefPolicy:
     """The fixed policy for the setup phase. ``setup_depth <= 1`` is
-    ``lookahead(heuristic)`` -- a 1-ply pip-maxing opener; the default, since at 2p
-    a depth-6 search ties it (the heuristic value is ~additive, so greedy ≈ optimal
-    pairing) at a fraction of the cost. ``setup_depth >= 2`` switches to the
-    probabilistic-expectimax setup search (:func:`search.expectimax.make_setup_search`,
-    opponents Boltzmann-rational at ``setup_temperature``) -- kept for >= 3 players
-    and complementarity-aware values, where the deeper opening may pay off."""
+    ``lookahead(heuristic)`` -- a 1-ply pip-maxing opener; the default, since at
+    2p a depth-6 search ties it (the heuristic value is ~additive, so greedy ≈
+    optimal pairing) at a fraction of the cost. ``setup_depth >= 2`` switches to
+    the probabilistic-expectimax setup search
+    (:func:`search.expectimax.make_setup_search`, opponents Boltzmann-rational
+    at ``setup_temperature``) -- kept for >= 3 players and complementarity-aware
+    values, where the deeper opening may pay off."""
     if setup_depth <= 1:
-        return make_search(heuristic_value, num_simulations=0)
+        return make_setup_lookahead(heuristic_value)
     return make_setup_search(
         heuristic_value, n_players=n_players, depth=setup_depth,
         temperature=setup_temperature, beam=setup_beam,

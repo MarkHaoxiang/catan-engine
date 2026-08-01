@@ -14,8 +14,9 @@ engine-only seam primitives the search and its callers share.
   `make_search_weights_value` (the `BeliefPolicy`, the AlphaZero policy
   target, and the policy-plus-root-value target), the `num_simulations=0`
   lookahead special case, and the trade/`num_trees` machinery.
-- `expectimax.py` — `make_setup_search`, the compile-efficient beam
-  expectimax over the setup phase.
+- `expectimax.py` — the setup-phase openers: `make_setup_lookahead`, the
+  one-ply value sweep restricted to the setup placement rows, and
+  `make_setup_search`, the compile-efficient beam expectimax.
 - `_common.py` — shared prior/dice constants and the policy-weights types.
 - `priors.py` — `TIER_SCORES`, the action-priority prior shared by the
   search's interior prior and greedy's scoring.

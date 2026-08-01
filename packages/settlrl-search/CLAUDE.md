@@ -18,7 +18,8 @@ Module map:
   `num_trees` over the tree, plus the trade machinery.
 - `_common.py` — shared prior/dice constants (`_TIER_LOGITS`, `_ROLL_P`,
   `_NO_PROPOSE`) and the `PolicyWeights` / `PolicyWeightsValue` types.
-- `expectimax.py` — the setup-phase search (`make_setup_search`).
+- `expectimax.py` — the setup-phase openers (`make_setup_lookahead`,
+  `make_setup_search`).
 - `policy.py` — the seat protocols and `AgentSpec` registry machinery.
 - `sample.py` — `sample_world` determinization.
 - `rows.py` — the flat-action decode.
@@ -208,7 +209,22 @@ and the search *answers* trades but never offers one. Lookahead offering measure
 
 ## expectimax.py
 
+`make_setup_lookahead` is the production setup opener (the GNN backend's
+`setup_depth <= 1` default): the one-ply value sweep restricted to the setup
+placement rows — the flat table's leading block, asserted at import — calling
+the two setup apply cores directly (vmapping `apply_action`'s `lax.switch`
+would evaluate every branch per row) plus `resolve_step` with the longest-road
+gate off (a setup type is never a gated build, so the vmapped DFS runs zero
+trips). Its contract is **bit-identity** to
+`make_search(value, num_simulations=0)` at factory defaults on setup-phase
+states: same `(N_FLAT,)` tie-break noise draw (sliced, never re-shaped — a
+narrower draw would change the bits), same num_trees=1 key chain, same sampled
+world, same masked-argmax. Pinned by `tests/test_expectimax.py`. The width cut
+matters because vmap-lockstep self-play invokes the setup policy on **all**
+lanes every step and discards the non-setup results — the sweep is per-step
+overhead, not a per-setup-move cost.
+
 `make_setup_search` is the compile-efficient beam expectimax over the setup
 phase — deep setup expectimax that ties lookahead at depth 6 (heuristic leaf
-~additive; see [[gnn-alphazero-0004]]). The GNN backend uses it as the fixed
-setup opener.
+~additive; see [[gnn-alphazero-0004]]). Kept for >= 3 players /
+complementarity-aware values (`setup_depth >= 2`).

@@ -415,8 +415,11 @@ uses them.
     optax adamw, the net plays setup itself.
   - `training/gnn_backend.py::GNNBackend` — the `BoardGNN` net over the board
     graph; **masked** policy CE (softmax over the legal set only) + value loss,
-    eqx-filtered optax step. `setup_policy` (a fixed `lookahead`/expectimax
-    opener) plays the setup phase in both self-play and the arena;
+    eqx-filtered optax step. `setup_policy` (at `setup_depth <= 1` the
+    setup-row-restricted `make_setup_lookahead` opener — under vmap-lockstep
+    self-play it runs on every lane every step, so its sweep width is hot;
+    `>= 2` the beam expectimax) plays the setup phase in both self-play and
+    the arena;
     `make_net_agent` composes setup + the net's search; `gnn_loss` is the masked
     loss (its finiteness is contract-tested).
   - Both losses average the policy CE over the item's `train_policy` = 1

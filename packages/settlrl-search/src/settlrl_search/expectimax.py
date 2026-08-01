@@ -1,5 +1,7 @@
-"""A specialized search for the **setup phase** (the initial settlement/road
-placements) -- a depth-limited, beam-pruned *probabilistic expectimax*.
+"""The specialized setup-phase policies (the initial settlement/road
+placements): a one-ply value sweep restricted to the setup rows
+(``make_setup_lookahead``) and a depth-limited, beam-pruned *probabilistic
+expectimax* (``make_setup_search``).
 
 Setup is a short, fully-observable, high-leverage sub-game: there are no cards
 yet, so nothing is hidden, and the two opening settlements decide the whole
@@ -32,17 +34,21 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float
 from settlrl_engine.belief import BeliefView
-from settlrl_engine.board.layout import BoardLayout
+from settlrl_engine.board.layout import N_VERTICES, BoardLayout
 from settlrl_engine.board.state import BoardState, KeyScalar, Player
+from settlrl_engine.env import N_FLAT
 from settlrl_engine.mechanics.action import ActionType, action_available, apply_action
+from settlrl_engine.mechanics.awards import resolve_step
 from settlrl_engine.mechanics.common import agent_selection_single
+from settlrl_engine.mechanics.setup import _setup_road_apply, _setup_settlement_apply
 
+from settlrl_search._common import _ILLEGAL
 from settlrl_search.policy import BeliefPolicy, FlatAction, FlatMask
 from settlrl_search.rows import ROW_PARAMS, ROW_TYPE
 from settlrl_search.sample import sample_world
 from settlrl_search.value import ValueFunction
 
-__all__ = ["make_setup_search"]
+__all__ = ["make_setup_lookahead", "make_setup_search"]
 
 # The flat rows that are setup placements (initial settlement or road).
 _SETUP_IDX = jnp.asarray(
@@ -54,6 +60,64 @@ _SETUP_IDX = jnp.asarray(
 _SETUP_TYPE = ROW_TYPE[_SETUP_IDX]
 _SETUP_PARAMS = jax.tree.map(lambda x: x[_SETUP_IDX], ROW_PARAMS)
 _N_SETUP = int(_SETUP_IDX.shape[0])
+
+# ``make_setup_lookahead`` relies on the setup rows being the flat table's
+# leading block -- all settlements, then all roads -- so a sweep index is
+# already its flat row and the mask/noise prefixes line up.
+assert np.array_equal(np.asarray(_SETUP_IDX), np.arange(_N_SETUP))
+assert np.all(
+    np.asarray(_SETUP_TYPE[:N_VERTICES]) == int(ActionType.SETUP_SETTLEMENT)
+) and np.all(np.asarray(_SETUP_TYPE[N_VERTICES:]) == int(ActionType.SETUP_ROAD))
+
+
+def make_setup_lookahead(value: ValueFunction) -> BeliefPolicy:
+    """The setup-phase one-ply opener: at a state whose legal actions are all
+    setup placements, returns exactly the move
+    ``make_search(value, num_simulations=0)`` (at factory defaults) would --
+    same successor values, same tie-break noise. At any other state the
+    returned index is meaningless (the caller gates on the phase)."""
+
+    def policy(
+        key: KeyScalar,
+        layout: BoardLayout,
+        view: BeliefView,
+        player: Player,
+        mask: FlatMask,
+    ) -> FlatAction:
+        # Mirror ``make_search``'s draws exactly: the tie-break noise is a
+        # full-width draw (a narrower shape would change the bits), and the
+        # world key is split off through the same num_trees=1 chain.
+        noise = jax.random.uniform(key, (N_FLAT,))[:_N_SETUP] * 1e-4
+        (tree_key,) = jax.random.split(key, 1)
+        world_key, _ = jax.random.split(tree_key)  # unused half: the propose gate
+        world = sample_world(world_key, view, player)
+        setup_mask = mask[:_N_SETUP]
+        # The two setup cores called directly over their own slice of the table
+        # (vmapping apply_action's lax.switch would evaluate every branch per
+        # row), then stage 2 exactly as apply_action runs it on a setup row:
+        # the longest-road recompute gated off (a setup placement is never a
+        # BuildRoad / BuildSettlement).
+        idx = _SETUP_PARAMS.idx
+        settlement_successors, settlement_result = jax.vmap(
+            lambda v, legal: _setup_settlement_apply(layout, world, v, legal)
+        )(idx[:N_VERTICES], setup_mask[:N_VERTICES])
+        road_successors, road_result = jax.vmap(
+            lambda e, legal: _setup_road_apply(layout, world, e, legal)
+        )(idx[N_VERTICES:], setup_mask[N_VERTICES:])
+        successors = jax.tree.map(
+            lambda a, b: jnp.concatenate([a, b]),
+            settlement_successors,
+            road_successors,
+        )
+        successors, _ = jax.vmap(lambda s, r: resolve_step(s, r, False))(
+            successors, jnp.concatenate([settlement_result, road_result])
+        )
+        values = jax.vmap(value, in_axes=(None, 0, None))(layout, successors, player)
+        weights = jnp.where(setup_mask, values, _ILLEGAL)
+        return jnp.argmax(jnp.where(setup_mask, weights + noise, -jnp.inf))
+
+    return policy
+
 
 _Vec = Float[Array, "n players"]
 
