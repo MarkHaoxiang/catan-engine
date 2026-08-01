@@ -40,6 +40,17 @@ def production_value_blend() -> float:
     return float(cast(Any, blend["max"]))
 
 
+def production_optim() -> OptimConfig:
+    """The production optimizer settings (lr / weight_decay / batch /
+    grad_clip), read from 0004's optim scale preset so a production optim
+    change can't silently de-sync the guard."""
+    optim = OmegaConf.to_container(
+        OmegaConf.load(_ALPHAZERO_DIR / "conf" / "optim" / "scale.yaml")
+    )
+    assert isinstance(optim, dict)
+    return OptimConfig.model_validate(optim)
+
+
 def _blend(data: dict[str, np.ndarray], alpha: float) -> np.ndarray:
     """The blended value target for ``data`` (the loop's own formula)."""
     blended, _ = prepare_targets(
@@ -110,25 +121,20 @@ def distill_train(
     val_item = backend.to_item(dict(val_data))  # raw z rides in .value
     val_blend_target = _blend(val_data, alpha)
 
-    optimizer = make_optimizer(
-        OptimConfig(
-            lr=cfg["lr"],
-            weight_decay=cfg["weight_decay"],
-            batch_size=cfg["batch_size"],
-        )
-    )
+    optim = production_optim()
+    optimizer = make_optimizer(optim)
     opt_state = backend.init_opt(optimizer, net)
     step = backend.make_step(optimizer)
 
     n = int(train_item.value.shape[0])
-    bs = cfg["batch_size"]
+    bs = optim.batch_size
     rng = np.random.default_rng(cfg["seed"])
     best = np.inf
     best_metrics: dict[str, float] = {}
     final_metrics: dict[str, float] = {}
     ckpt = run.dir / "best.eqx"
     wb = wandb.init(
-        project=cfg["wandb_project"], name=f"{cfg['arch']}-{cfg['task']}",
+        project=cfg["wandb_project"], name=f"{cfg['arch']}-{cfg['task']}-s{cfg['seed']}",
         mode=cfg["wandb_mode"], config=cfg, reinit=True, dir=str(run.dir),
     )  # fmt: skip
     try:

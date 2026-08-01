@@ -23,7 +23,9 @@ optimizer) supervised on a frozen dataset of the ``distill_anchor``'s own
 self-play (``distill.generate``; targets = the search's improved policy and
 the production value blend) and reports policy/value fit -- train and val are
 two independently generated datasets, so there is zero within-game leakage by
-construction. Its ``arch`` list must name GraphNet presets.
+construction. Deliberate divergences from the production recipe: uniform sims
+(no PCR mix) and a non-persistent generation batch -- both chosen so every
+position is a full-search target. Its ``arch`` list must name GraphNet presets.
 
     uv run python experiments/0003_neural_board_architectures/run.py [variant] [k=v ...]
 """
@@ -65,6 +67,7 @@ class NeuralBoardArchitecturesConfig(Config):
     # distill task: frozen anchor-self-play datasets (train and val generated
     # independently -- seed and seed+1000 -- for a leak-free-by-construction split)
     distill_anchor: str = "az2_hetero96x4"
+    distill_incumbent: str = "gn_hetero"  # the trunk challengers must beat
     distill_sims: int = 64
     distill_samples: int = 50_000
     distill_val_samples: int = 10_000
@@ -103,9 +106,12 @@ VARIANTS: dict[str, dict[str, object]] = {
         "feature_version": 2,
         "seeds": 3,
     },
-    # The architecture-decision guard: the production net (adopted trunk vs
-    # challenger at production size) distilled from frozen az2 self-play, at
-    # the production optimizer settings (lr/batch from 0004's optim/scale).
+    # The architecture-decision guard: the production net distilled from
+    # frozen az2 self-play; the optimizer (lr/weight_decay/grad_clip/batch)
+    # reads 0004's optim/scale.yaml directly (distill_train.production_optim).
+    # gn_global is judged as a challenger against the incumbent gn_hetero
+    # under the zero-overlap rule, so the expected reading is "fail" --
+    # correct: gn_global is not better than the adopted trunk.
     # Budget: 50k train samples / batch 1024 -> 48 steps/epoch, x30 epochs =
     # 1440 steps per arch-seed; 6 arch-seeds ~ 10-15 GPU-min + one-off
     # generation (~60k samples).
@@ -119,8 +125,6 @@ VARIANTS: dict[str, dict[str, object]] = {
         "layers": 4,
         "depth": 2,
         "epochs": 30,
-        "batch_size": 1024,
-        "lr": 5e-4,
         "eval_every": 2,
     },
     "smoke": {
@@ -158,6 +162,32 @@ def aggregate_seeds(
     return entry, mean
 
 
+def distill_verdict(
+    results: dict[str, dict[str, float | list[float]]], incumbent: str
+) -> tuple[str, dict[str, bool]]:
+    """The guard's pass rule: a challenger passes iff its worst-seed
+    ``best_policy_kl`` is strictly below the incumbent's best-seed value
+    (a zero-overlap win; lower = better). Returns the run verdict -- ``"pass"``
+    if every challenger passes, ``"fail"`` if none do, ``"mixed"`` otherwise,
+    ``"recorded"`` when the incumbent (or any challenger) is absent -- and the
+    per-challenger booleans."""
+
+    def seed_values(arch: str) -> list[float]:
+        values = results[arch]["best_policy_kl"]
+        if isinstance(values, list):
+            return [float(v) for v in values]
+        return [float(values)]
+
+    challengers = [a for a in results if a != incumbent]
+    if incumbent not in results or not challengers:
+        return "recorded", {}
+    incumbent_best = min(seed_values(incumbent))
+    passes = {a: max(seed_values(a)) < incumbent_best for a in challengers}
+    if all(passes.values()):
+        return "pass", passes
+    return "fail" if not any(passes.values()) else "mixed", passes
+
+
 def run_distill(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
     import jax
     from settlrl_learn.nn.graphnet import PRESETS
@@ -180,6 +210,7 @@ def run_distill(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
         cfg.distill_anchor, cfg.distill_sims, cfg.collect_batch,
         cfg.distill_val_samples, cfg.seed + 1000,
     )  # fmt: skip
+    hetero_archs = [a for a in archs if PRESETS[a].hetero]
     for name, d in (("train", train_data), ("val", val_data)):
         if (
             int(d["feature_version"]) != cfg.feature_version
@@ -189,6 +220,12 @@ def run_distill(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
                 f"{name} dataset was generated at feature_version="
                 f"{int(d['feature_version'])}/incidence={bool(d['incidence'])}, "
                 f"but the run wants {cfg.feature_version}/{cfg.incidence}"
+            )
+        if hetero_archs and not bool(d["with_tiles"]):
+            raise ValueError(
+                f"{name} dataset was generated with_tiles=False (non-hetero "
+                f"backend, constant-zero tiles), but the hetero trunk(s) "
+                f"{hetero_archs} need real tile features"
             )
     run.log(
         n_train=int(train_data["value"].shape[0]),
@@ -216,10 +253,12 @@ def run_distill(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
             per_seed.append(metrics)
             run.log(arch=arch, **metrics)
         results[arch], means[arch] = aggregate_seeds(per_seed, cfg.seeds)
+    verdict, beats_incumbent = distill_verdict(results, cfg.distill_incumbent)
+    for challenger, beats in beats_incumbent.items():
+        results[challenger]["beats_incumbent"] = beats
     run.save_json("results.json", results)
-    # No go/no-go yet: the guard's thresholds land with its retro-validation.
     run.finish(
-        "recorded", select="best_policy_kl",
+        verdict, select="best_policy_kl", incumbent=cfg.distill_incumbent,
         **{a: means[a].get("best_policy_kl") for a in archs},
     )  # fmt: skip
 

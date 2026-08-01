@@ -163,17 +163,26 @@ replicates.
 The `distill` task (`guard` variant) is the architecture-decision guard:
 `distill.py` generates a frozen dataset from the az2 anchor's own self-play
 through the production stack (`selfplay_callables`/`run_selfplay`; search
-semantics from the anchor sidecar, PCR off so every position is a
-full-search target) holding the GNN observation, the search's improved
-policy, `mask`, the root search value `q` and the raw outcome `z` — kept
-separate in the dump, cached under `runs/_cache/0003` keyed by
-`(anchor, sims, batch, n_samples, seed)` + `_DISTILL_SCHEMA`.
-`distill_train.py` trains the *production* net (`GNNBackend` over a GraphNet
-preset — the `arch` list must name presets) with the backend's own train step
-and optimizer, blending the value target at training time via
-`steps.prepare_targets` with alpha read from 0004's `value_blend/scale.yaml`;
-val metrics are masked policy KL (the best-checkpoint criterion), top-1
-agreement, and P(win) MSE vs the blended target and vs raw `z`. Train and
-val are two independently generated datasets (generation seeds `seed` and
-`seed+1000`), so the split is leak-free by construction. Verdict is
-`"recorded"` — the go/no-go thresholds land with the retro-validation.
+semantics from the anchor sidecar, the production opening-temperature
+schedule) holding the GNN observation, the search's improved policy, `mask`,
+the root search value `q` and the raw outcome `z` — kept separate in the
+dump, cached under `runs/_cache/0003` keyed by
+`(anchor, sims, batch, n_samples, seed)` + `_DISTILL_SCHEMA`. Deliberate
+divergences from the production recipe: uniform sims (no PCR mix) and a
+non-persistent generation batch — both chosen so every position is a
+full-search target. `distill_train.py` trains the *production* net
+(`GNNBackend` over a GraphNet preset — the `arch` list must name presets)
+with the backend's own train step and optimizer
+(lr/weight_decay/grad_clip/batch read from 0004's `optim/scale.yaml`),
+blending the value target at training time via `steps.prepare_targets` with
+alpha read from 0004's `value_blend/scale.yaml`; val metrics are masked
+policy KL (the best-checkpoint criterion), top-1 agreement, and P(win) MSE
+vs the blended target and vs raw `z`. Train and val are two independently
+generated datasets (generation seeds `seed` and `seed+1000`), so the split
+is leak-free by construction. Verdict (`run.distill_verdict`): with the
+incumbent (`distill_incumbent`, default `gn_hetero`) in the arch list, a
+challenger passes iff its worst-seed `best_policy_kl` is strictly below the
+incumbent's best-seed value (a zero-overlap win, lower = better) — every
+challenger passing → `"pass"`, none → `"fail"`, otherwise `"mixed"`, with
+per-challenger `beats_incumbent` booleans in `results.json`; incumbent
+absent → `"recorded"`.

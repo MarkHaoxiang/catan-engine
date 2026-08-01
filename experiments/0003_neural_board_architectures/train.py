@@ -175,7 +175,7 @@ def train(
     ckpt = run.dir / "best.eqx"
     bs = cfg["batch_size"]
     wb = wandb.init(
-        project=cfg["wandb_project"], name=f"{cfg['arch']}-{task}",
+        project=cfg["wandb_project"], name=f"{cfg['arch']}-{task}-s{cfg['seed']}",
         mode=cfg["wandb_mode"], config=cfg, reinit=True, dir=str(run.dir),
     )  # fmt: skip
     try:

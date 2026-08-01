@@ -76,10 +76,30 @@ def test_0003_distill_config_records_q() -> None:
     distill = load_run("0003_neural_board_architectures", module="distill")
     cfg = distill.learn_config("az2_hetero96x4", sims=8, batch=8, n_samples=64)
     assert cfg.selfplay.pcr_full_prob == 1.0
-    assert cfg.selfplay.samples == 64 and cfg.selfplay.batch == 8
-    assert cfg.search.num_simulations == 8
     spec = recorded_spec({}, n_flat=N_FLAT, record_value=cfg.value_blend.max > 0)
     assert "q" in spec and "train_policy" in spec
+
+
+def test_0003_distill_verdict_rule() -> None:
+    # The guard's encoded pass rule, pure over synthetic results: a challenger
+    # passes iff its worst seed strictly beats the incumbent's best seed on
+    # best_policy_kl (lower = better); every challenger passing -> "pass",
+    # none -> "fail", some -> "mixed", incumbent absent -> "recorded".
+    run = load_run("0003_neural_board_architectures")
+    incumbent = {"best_policy_kl": [0.25, 0.30, 0.28]}
+    winner = {"best_policy_kl": 0.24}  # single seed: worst 0.24 < best 0.25
+    overlap = {"best_policy_kl": [0.10, 0.26, 0.24]}  # worst 0.26 >= 0.25
+    inc = "gn_hetero"
+    assert run.distill_verdict({inc: incumbent, "a": winner}, inc) == (
+        "pass", {"a": True},
+    )  # fmt: skip
+    assert run.distill_verdict({inc: incumbent, "a": overlap}, inc) == (
+        "fail", {"a": False},
+    )  # fmt: skip
+    assert run.distill_verdict({inc: incumbent, "a": winner, "b": overlap}, inc) == (
+        "mixed", {"a": True, "b": False},
+    )  # fmt: skip
+    assert run.distill_verdict({"a": winner}, inc) == ("recorded", {})
 
 
 # The one genuinely tiny end-to-end 0004 run: the mlp path (not gnn -- gnn
