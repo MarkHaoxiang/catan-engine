@@ -138,26 +138,21 @@ default in `scale2`/`v2_base` (neither was active for the original sweep).
 candidate batch bump for `v2_base` and every `v2_*` preset, not adopted
 silently.
 
-## 7. Arena-cadence retune check (16.1% measured vs 9.8% budget)
+## 7. Arena-cadence retune — measured, rotation landed
 
-`experiments/0004_alphazero/conf/experiment/scale2_long.yaml`'s comment
-derives a 9.8% arena wall-share budget (`arena.games=64`, `arena.every=150`)
-from the pre-run cost model (`295s / (150 * 20s/iter) ~= 9.8%`). The live
-run's realized wall-share measured **16.1%** instead — measured from
-`runs/0004_alphazero/2026-07-29T122854Z`'s `metrics.jsonl`: sum of logged
-`t_arena` over wall-clock time across the run's first 1719 iterations (cite
-that run dir + iteration count as the provenance if this number is quoted
-again). Pull the actual per-round arena duration and per-iteration wall-clock
-from that same `metrics.jsonl` / wandb history and recompute the realized
-share directly (no new script needed, just the arithmetic against logged
-timestamps) rather than trusting the pre-run estimate.
+Measured (2026-07-31 hetero run, `metrics.jsonl` `t_arena` over wall-clock):
+the in-loop arena was **24.9%** of the run's wall — **mean 870 s/round**, 16
+rounds — well past scale2_long's 9.8% budget and its earlier 16.1% reading
+(`runs/0004_alphazero/2026-07-29T122854Z`, first 1719 iterations; that run
+carried only the az0 rung — the hetero run's three net rungs at ~280 s/match
+each, all firing every round, are the gap).
 
-**Decision:** if 16.1% is confirmed (not an artifact of a cold-start
-iteration or a one-off slow round), retune `arena.games`/`arena.every` in
-`scale2_long.yaml` (and the `v2_*` study presets, which now carry the same
-`games=64`/`every=150` starting point as a direct per-preset override, landed
-2026-07-30 — before that they inherited `arena: scale`'s raw pre-fix cadence,
-`games=128`/`every=10`, ~70% wall-share, not scale2_long's measured 16.1%)
-down to actually hit the 9.8% budget — halving `games` again (64 → 32) is the
-cheapest lever before touching `every`. Record the retuned values and the
-before/after realized share in `experiments/JOURNAL.md`.
+**Landed fix (2026-08-01):** the frozen net rungs rotate instead of stacking —
+`ArenaNetOpponent.phase` (predicate `(round_index + phase) % every == 0`), with
+`conf/arena/scale.yaml` at az0/az1/az2 `every: 3`, phases 0/1/2, so ~1 net rung
+fires per round (lookahead every round, random every 5). Expected ~550-650
+s/round vs the 870 s pre-rotation mean. The in-loop Elo pools 3 anchors/round
+instead of 5 (SE ~20 → ~27); the final gauntlet neutralizes every schedule, so
+the gate is untouched. If the realized share still overshoots the 9.8% budget,
+halving `games` (64 → 32) is the next-cheapest lever; record any further retune
+and the before/after realized share in `experiments/JOURNAL.md`.

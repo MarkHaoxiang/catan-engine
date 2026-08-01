@@ -29,7 +29,8 @@ search:
   num_simulations: 128
 replay:
   buffer_max: 200000
-# games=64 / every=150 holds the in-loop arena at ~10% of wall-clock.
+# games=64 / every=150: measured 24.9% of wall pre-rotation (2026-07-31 hetero
+# run, mean 870 s/round); arena/scale.yaml now rotates the net rungs (~1/round).
 arena:
   games: 64
   every: 150

@@ -341,7 +341,7 @@ uses them.
     `run_arena`'s `round_index` isn't a multiple of N, saving wall-clock on
     anchors that no longer carry information (e.g. `random`, which pins at 1.0
     winrate early). **Frozen checkpoints join the gauntlet** through
-    `learn(..., net_opponents={name: (spec, elo, every)})` → `run_arena`: ready
+    `learn(..., net_opponents={name: (spec, elo, every, phase)})` → `run_arena`: ready
     play specs, so the library never learns about checkpoint files or
     architectures — the experiment composes them (0004's `anchors.load_anchor`
     + `GNNBackend.play_agent`; the frozen ladder is three rungs — az0 −58 /
@@ -349,9 +349,15 @@ uses them.
     seated via `net_opponents` in `conf/arena/scale.yaml`. az0's Elo is
     calibrated by a joint round-robin MLE —
     `experiments/0004_alphazero/calibrate.py`, JOURNAL 2026-07-29; az1/az2's
-    Elos are their own final-gauntlet readings). They're scheduled by their own `every`, reported as
+    Elos are their own final-gauntlet readings). They're scheduled by their own
+    `(every, phase)` — play iff `(round_index + phase) % every == 0`, so
+    same-`every` rungs with staggered phases rotate one-per-round instead of all
+    firing together (scale.yaml runs the three rungs at every=3, phases 0/1/2;
+    arena measured 24.9% of wall / 870 s/round with all three firing every
+    round, 2026-07-31 hetero run) — reported as
     `arena_vs_<name>`, and join the same Elo MLE; their seeds start at `seed +
-    steps.NET_OPPONENT_SEED_BASE` (50k — room for five registry opponents), so
+    steps.NET_OPPONENT_SEED_BASE` (50k — room for five registry opponents) and
+    follow dict enumeration order (`phase` schedules, never re-seeds), so
     adding one leaves the registry opponents' games bit-identical — a mid-rung
     must not perturb the curve it refines. The loop holds the arena **seed
     fixed across iterations** (no `+i`), so every checkpoint faces the same

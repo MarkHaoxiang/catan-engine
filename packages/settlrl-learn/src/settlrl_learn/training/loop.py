@@ -198,7 +198,7 @@ def learn(
     cfg: LearnConfig,
     *,
     teacher_value: ValueFunction | None = None,
-    net_opponents: Mapping[str, tuple[OpponentSpec, float, int]] | None = None,
+    net_opponents: Mapping[str, tuple[OpponentSpec, float, int, int]] | None = None,
     checkpoint_dir: str | Path | None = None,
     resume_from: str | Path | None = None,
     on_iter: Callable[[int, dict[str, float], Any], None] | None = None,
@@ -211,7 +211,7 @@ def learn(
     a fixed strong search (``cfg.teacher.sims`` simulations) over ``teacher_value``
     instead of the cold net.
 
-    ``net_opponents`` (name -> ``(spec, anchor_elo, every)``) adds pre-built arena
+    ``net_opponents`` (name -> ``(spec, anchor_elo, every, phase)``) adds pre-built arena
     opponents alongside ``cfg.arena.opponents`` -- the loop stays agnostic about
     where a spec comes from, so a frozen checkpoint is composed by the caller
     (see :func:`~settlrl_learn.training.steps.run_arena`).

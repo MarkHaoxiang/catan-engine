@@ -95,7 +95,7 @@ def run_arena(
     *,
     seed: int,
     round_index: int,
-    net_opponents: Mapping[str, tuple[OpponentSpec, float, int]] | None = None,
+    net_opponents: Mapping[str, tuple[OpponentSpec, float, int, int]] | None = None,
 ) -> dict[str, float]:
     """Play the net against each configured opponent; ``lookahead`` -> the gate
     metric ``arena_winrate``, others -> ``arena_vs_<opponent>``, plus ``arena_elo``
@@ -109,11 +109,14 @@ def run_arena(
     ``round_index % N == 0``, contributing no metric and no Elo input that
     round.
 
-    ``net_opponents`` maps a name to ``(spec, anchor_elo, every)``: a pre-built
-    opponent (e.g. a frozen checkpoint's play agent) played alongside the registry
-    ones under the same seat-swap, scheduling and Elo MLE, reported as
-    ``arena_vs_<name>``. Their seeds start at ``seed + NET_OPPONENT_SEED_BASE``,
-    so the registry opponents' games are identical with and without them."""
+    ``net_opponents`` maps a name to ``(spec, anchor_elo, every, phase)``: a
+    pre-built opponent (e.g. a frozen checkpoint's play agent) played alongside
+    the registry ones under the same seat-swap, scheduling and Elo MLE, reported
+    as ``arena_vs_<name>``. It plays when ``(round_index + phase) % every == 0``,
+    so same-``every`` opponents with distinct phases rotate instead of stacking
+    on one round. Their seeds start at ``seed + NET_OPPONENT_SEED_BASE`` and
+    follow dict enumeration order (``phase`` never reorders them), so the
+    registry opponents' games are identical with and without them."""
     metrics: dict[str, float] = {}
     elo_inputs: list[tuple[float, float, int]] = []
     for j, opp in enumerate(cfg.opponents):
@@ -130,8 +133,10 @@ def run_arena(
         )
         if opp in cfg.anchor_elos:
             elo_inputs.append((cfg.anchor_elos[opp], res.wins, res.episodes))
-    for k, (name, (spec, elo, every)) in enumerate((net_opponents or {}).items()):
-        if every > 1 and round_index % every != 0:
+    for k, (name, (spec, elo, every, phase)) in enumerate(
+        (net_opponents or {}).items()
+    ):
+        if every > 1 and (round_index + phase) % every != 0:
             continue
         res = arena_spec(
             backend, net, opponent=spec, n_games=cfg.games,

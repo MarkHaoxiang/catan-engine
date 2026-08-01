@@ -71,10 +71,13 @@ class NetConfig(_Sub):
 
 class ArenaNetOpponent(_Sub):
     """A frozen checkpoint at the arena table: pinned Elo + play-every-N schedule
-    for the ``anchors/`` artifact of the same name."""
+    for the ``anchors/`` artifact of the same name. It plays on rounds where
+    ``(round_index + phase) % every == 0``, so same-``every`` rungs with distinct
+    phases rotate one-per-round instead of stacking on the same round."""
 
     elo: float
     every: int = Field(default=1, ge=1)
+    phase: int = Field(default=0, ge=0)
 
 
 class ArenaSettings(ArenaConfig):

@@ -34,7 +34,7 @@ class BenchConfig(BaseModel):
 
 def build_net_opponents(
     cfg: AlphaZeroConfig,
-) -> dict[str, tuple[BeliefSpec, float, int]]:
+) -> dict[str, tuple[BeliefSpec, float, int, int]]:
     """The specs `learn` seats for ``cfg.arena.net_opponents``: each named anchor
     loaded from ``anchors/`` and played by its own GNN search at the arena's
     budget, under the calibration's frozen setup opener
@@ -48,7 +48,7 @@ def build_net_opponents(
     )
 
     s = cfg.search
-    out: dict[str, tuple[BeliefSpec, float, int]] = {}
+    out: dict[str, tuple[BeliefSpec, float, int, int]] = {}
     for name, opp in cfg.arena.net_opponents.items():
         net, netcfg = load_anchor(name)
         backend = GNNBackend(
@@ -66,6 +66,7 @@ def build_net_opponents(
             BeliefSpec(lambda agent=agent: agent, frozenset((2,))),
             opp.elo,
             opp.every,
+            opp.phase,
         )
     return out
 
@@ -74,14 +75,14 @@ def run_final_gauntlet(
     backend: Backend,
     net: Any,
     cfg: AlphaZeroConfig,
-    net_opponents: dict[str, tuple[BeliefSpec, float, int]],
+    net_opponents: dict[str, tuple[BeliefSpec, float, int, int]],
 ) -> dict[str, float]:
     """The end-of-run verdict gauntlet: every configured opponent (the registry
     ones plus ``net_opponents``) at ``cfg.final_games`` games each, with every
     per-round schedule neutralized so nothing is skipped (``opponent_every={}``,
-    every net opponent's ``every`` forced to 1). With every schedule's period 1,
-    ``round_index % 1 == 0`` unconditionally, so ``round_index`` plays no role;
-    0 is passed for clarity. Seeded off ``cfg.seed + 99`` so the gauntlet's games
+    every net opponent's ``every``/``phase`` forced to 1/0). With every
+    schedule's period 1, ``round_index % 1 == 0`` unconditionally, so
+    ``round_index`` plays no role; 0 is passed for clarity. Seeded off ``cfg.seed + 99`` so the gauntlet's games
     stay disjoint from the in-loop training arenas.
 
     Drops jax's compilation caches first, so no compiled program a caller built
@@ -100,7 +101,8 @@ def run_final_gauntlet(
         **cfg.arena.model_dump(exclude={"net_opponents"})
     ).model_copy(update={"games": cfg.final_games, "opponent_every": {}})
     final_opponents = {
-        name: (spec, elo, 1) for name, (spec, elo, _every) in net_opponents.items()
+        name: (spec, elo, 1, 0)
+        for name, (spec, elo, _every, _phase) in net_opponents.items()
     }
     return run_arena(
         backend, net, final_arena_cfg, seed=cfg.seed + 99, round_index=0,

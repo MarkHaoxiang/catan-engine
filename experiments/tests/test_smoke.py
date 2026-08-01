@@ -232,7 +232,7 @@ def test_0004_scale_arena_names_the_az0_rung() -> None:
     run = load_run("0004_alphazero")
     cfg = run.compose_config(["+experiment=small"])
     az0 = cfg.arena.net_opponents["az0_gnn96x4"]
-    assert (az0.elo, az0.every) == (-58.0, 1)
+    assert (az0.elo, az0.every, az0.phase) == (-58.0, 3, 0)
     assert not hasattr(cfg.to_learn_config().arena, "net_opponents")
 
 
@@ -242,8 +242,8 @@ def test_0004_builds_net_opponent_specs() -> None:
     run = load_run("0004_alphazero")
     cfg = run.compose_config(["+experiment=small"])
     opponents = run.build_net_opponents(cfg)
-    spec, elo, every = opponents["az0_gnn96x4"]
-    assert (elo, every) == (-58.0, 1)
+    spec, elo, every, phase = opponents["az0_gnn96x4"]
+    assert (elo, every, phase) == (-58.0, 3, 0)
     assert 2 in spec.n_players and callable(spec.policy)
 
 
@@ -297,7 +297,7 @@ def test_0004_final_gauntlet_neutralizes_schedules(
         return fake_run_arena(*args, **kwargs)
 
     monkeypatch.setattr(arena_helpers, "run_arena", recording_run_arena)
-    net_opponents = {"az0": (object(), -100.0, 5)}  # every=5, to be neutralized
+    net_opponents = {"az0": (object(), -100.0, 5, 2)}  # every/phase, to be neutralized
 
     metrics = run.run_final_gauntlet(object(), object(), cfg, net_opponents)
 
@@ -307,7 +307,7 @@ def test_0004_final_gauntlet_neutralizes_schedules(
     assert arena_cfg.opponent_every == {}
     assert captured["seed"] == cfg.seed + 99
     got_opponents = captured["net_opponents"]
-    assert got_opponents["az0"][2] == 1
+    assert got_opponents["az0"][2:] == (1, 0)
     assert metrics == {"arena_elo": 10.0, "arena_elo_se": 1.0, "arena_winrate": 0.5}
 
 

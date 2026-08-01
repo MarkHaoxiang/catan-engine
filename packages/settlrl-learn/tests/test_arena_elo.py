@@ -131,7 +131,7 @@ def test_run_arena_net_opponent_joins_metrics_and_elo(monkeypatch: Any) -> None:
     cfg = ArenaConfig(games=40, opponents=["lookahead"], anchor_elos={"lookahead": 0.0})
     metrics = run_arena(
         MLPBackend((16,)), object(), cfg, seed=7, round_index=1,
-        net_opponents={"az0": (_dummy_spec(), -100.0, 1)},
+        net_opponents={"az0": (_dummy_spec(), -100.0, 1, 0)},
     )  # fmt: skip
     inputs = [(0.0, 30.0, 50), (-100.0, 24.0, 40)]
     assert metrics["arena_winrate"] == 0.6
@@ -165,7 +165,10 @@ def test_run_arena_net_opponent_every_and_registry_seeds(monkeypatch: Any) -> No
         anchor_elos={"lookahead": 0.0, "random": -1115.0},
     )
     backend = MLPBackend((16,))
-    net_opponents = {"az0": (_dummy_spec(), -100.0, 3), "az1": (_dummy_spec(), 50.0, 1)}
+    net_opponents = {
+        "az0": (_dummy_spec(), -100.0, 3, 0),
+        "az1": (_dummy_spec(), 50.0, 1, 0),
+    }
 
     metrics = run_arena(
         backend, object(), cfg, seed=0, round_index=1, net_opponents=net_opponents
@@ -192,3 +195,49 @@ def test_run_arena_net_opponent_every_and_registry_seeds(monkeypatch: Any) -> No
     base = run_arena(backend, object(), cfg, seed=0, round_index=3)
     assert reg_seeds == [0, 10_000] and net_calls == []
     assert base["arena_elo"] == anchored_elo([(0.0, 30.0, 50), (-1115.0, 30.0, 50)])
+
+
+def test_run_arena_net_opponent_phase_rotates_rungs(monkeypatch: Any) -> None:
+    # Three rungs at every=3 with phases 0/1/2 rotate: exactly one plays per
+    # round, each keeping its own enumeration-position seed regardless of which
+    # rounds its phase selects (phase schedules, never re-seeds).
+    played: list[tuple[str, int]] = []
+
+    def _fake_spec_arena(*a: Any, opponent: Any, seed: int, **k: Any) -> ArenaResult:
+        played.append((cast("str", opponent.policy), seed))
+        return ArenaResult(wins=24.0, episodes=40)
+
+    monkeypatch.setattr(
+        "settlrl_learn.training.steps.arena",
+        lambda *a, **k: ArenaResult(wins=30.0, episodes=50),
+    )
+    monkeypatch.setattr("settlrl_learn.training.steps.arena_spec", _fake_spec_arena)
+    cfg = ArenaConfig(games=40, opponents=["lookahead"], anchor_elos={"lookahead": 0.0})
+    net_opponents = {
+        name: (
+            BeliefSpec(lambda name=name: cast("Any", name), frozenset((2,))),
+            e,
+            3,
+            p,
+        )
+        for name, e, p in [("az0", -58.0, 0), ("az1", 110.0, 1), ("az2", 187.0, 2)]
+    }
+
+    schedule: dict[int, list[tuple[str, int]]] = {}
+    for round_index in range(1, 7):
+        played.clear()
+        metrics = run_arena(
+            MLPBackend((16,)), object(), cfg, seed=0,
+            round_index=round_index, net_opponents=net_opponents,
+        )  # fmt: skip
+        schedule[round_index] = list(played)
+        assert sum(f"arena_vs_az{i}" in metrics for i in range(3)) == 1
+
+    assert schedule == {
+        1: [("az2", 70_000)],  # (1 + 2) % 3 == 0
+        2: [("az1", 60_000)],  # (2 + 1) % 3 == 0
+        3: [("az0", 50_000)],  # (3 + 0) % 3 == 0
+        4: [("az2", 70_000)],
+        5: [("az1", 60_000)],
+        6: [("az0", 50_000)],
+    }
