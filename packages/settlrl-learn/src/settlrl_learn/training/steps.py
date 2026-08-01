@@ -66,11 +66,17 @@ def train_epochs(
 ) -> tuple[Any, Any, dict[str, float]]:
     """Run ``steps`` minibatch updates, sampling from ``buffer``; return the
     updated ``(net, opt_state)`` and the per-step-averaged metrics."""
-    sums: dict[str, float] = {}
+    # Metric scalars stay on device until after the loop (a per-step float()
+    # would block dispatch on every step); one device_get feeds the same
+    # host-float accumulation, so the returned values are identical.
+    per_step: list[Any] = []
     for _ in range(steps):
         key, k = jax.random.split(key)
         item = buffer.sample(buf_state, k).experience
         net, opt_state, m = step(net, opt_state, item)
+        per_step.append(m)
+    sums: dict[str, float] = {}
+    for m in jax.device_get(per_step):
         for kk, vv in m.items():
             sums[kk] = sums.get(kk, 0.0) + float(vv)
     return net, opt_state, {kk: vv / steps for kk, vv in sums.items()}
