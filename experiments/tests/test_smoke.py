@@ -64,7 +64,7 @@ def test_0003_distill_config_records_q() -> None:
     # recorded-keys spec self-play builds from it -- with PCR off, so every
     # position is a full-search policy target.
     from settlrl_engine.env import N_FLAT
-    from settlrl_learn.training.carry import recorded_spec
+    from settlrl_learn.training.selfplay.carry import recorded_spec
 
     distill = load_run("0003_neural_board_architectures", module="distill")
     cfg = distill.learn_config("az2_hetero96x4", sims=8, batch=8, n_samples=64)
@@ -240,7 +240,8 @@ def test_0004_builds_net_opponent_specs() -> None:
     # Composition only: the named anchor loads and becomes a seatable
     # NetOpponent -- its net deserialized and its backend pinned to the frozen
     # setup semantics (no game is played -- that is a GPU-scale cost).
-    from settlrl_learn.training import GNNBackend, NetOpponent
+    from settlrl_learn.evaluation import NetOpponent
+    from settlrl_learn.training import GNNBackend
 
     run = load_run("0004_alphazero")
     cfg = run.compose_config(["+experiment=small"])

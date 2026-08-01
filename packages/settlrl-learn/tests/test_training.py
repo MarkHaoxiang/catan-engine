@@ -38,11 +38,11 @@ from settlrl_learn.training import (
     prepare_targets,
     train_epochs,
 )
-from settlrl_learn.training.backend import Backend, load_run_state, save_run_state
-from settlrl_learn.training.carry import carry_template
+from settlrl_learn.training.backends.base import Backend, load_run_state, save_run_state
 from settlrl_learn.training.config import ArenaConfig, EvalConfig
 from settlrl_learn.training.loop import learn, selfplay_callables
 from settlrl_learn.training.selfplay import Samples, self_play
+from settlrl_learn.training.selfplay.carry import carry_template
 
 
 def _shapes(tree: object) -> str:
@@ -486,7 +486,7 @@ def test_mlp_loss_masks_policy_by_train_policy() -> None:
     # only (so it equals the loss on that subset), while value loss spans all.
     from settlrl_learn.features import FEATURE_DIM
     from settlrl_learn.training import mlp_loss
-    from settlrl_learn.training.mlp_backend import MLPItem
+    from settlrl_learn.training.backends.mlp import MLPItem
 
     rng = np.random.default_rng(0)
     n = 6
@@ -515,7 +515,7 @@ def test_bool_item_dtypes_are_loss_and_grad_bit_exact_with_float32() -> None:
     from jaxtyping import Array, Float
     from settlrl_learn.nn.graph import Sample
     from settlrl_learn.training import mlp_loss
-    from settlrl_learn.training.gnn_backend import gnn_loss
+    from settlrl_learn.training.backends.gnn import gnn_loss
 
     def widen(item: Any) -> Any:  # the pre-rev float32 item form
         wide = {

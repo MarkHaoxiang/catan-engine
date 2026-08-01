@@ -22,10 +22,10 @@ from typing import Any
 
 import equinox as eqx
 
-from settlrl_learn.training.backend import Backend
-from settlrl_learn.training.carry import SelfPlayCarry
+from settlrl_learn.training.backends.base import Backend
 from settlrl_learn.training.config import LearnConfig
 from settlrl_learn.training.loop import run_selfplay, selfplay_callables
+from settlrl_learn.training.selfplay.carry import SelfPlayCarry
 
 
 def bench_selfplay(

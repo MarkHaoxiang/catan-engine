@@ -17,10 +17,10 @@ import jax
 import optax
 from jaxtyping import Array
 
-from settlrl_learn.training.arena import NetOpponent, OpponentSpec, arena, arena_spec
-from settlrl_learn.training.backend import Backend
+from settlrl_learn.evaluation.arena import NetOpponent, OpponentSpec, arena, arena_spec
+from settlrl_learn.evaluation.elo import anchored_elo, anchored_elo_se
+from settlrl_learn.training.backends.base import Backend
 from settlrl_learn.training.config import ArenaConfig, OptimConfig
-from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
 from settlrl_learn.training.selfplay import Samples
 
 
@@ -118,7 +118,7 @@ def run_arena(
 
     ``net_opponents`` maps a name to ``(spec, anchor_elo, every, phase)``: a
     pre-built opponent (a spec, or a frozen checkpoint's
-    :class:`~settlrl_learn.training.arena.NetOpponent`) played alongside
+    :class:`~settlrl_learn.evaluation.arena.NetOpponent`) played alongside
     the registry ones under the same seat-swap, scheduling and Elo MLE, reported
     as ``arena_vs_<name>``. It plays when ``(round_index + phase) % every == 0``,
     so same-``every`` opponents with distinct phases rotate instead of stacking

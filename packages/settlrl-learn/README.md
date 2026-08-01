@@ -35,6 +35,8 @@ shipped path); `experiments/` composes these.
   (`action_layout`).
 - `settlrl_learn.training` — the self-play → replay → train → arena loop
   (`learn`) behind a `Backend` seam, with a flat-MLP and a board-GNN backend.
+- `settlrl_learn.evaluation` — head-to-head gating of frozen nets: the arena
+  driver and the anchored-Elo MLE.
 - `settlrl_learn.experiment` — the lab harness (run bookkeeping + the
   pydantic / OmegaConf config base) for `experiments/`.
 

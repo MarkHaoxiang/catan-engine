@@ -14,7 +14,7 @@ from types import ModuleType
 
 import pytest
 from conftest import load_run
-from settlrl_learn.training.elo import anchored_elo, expected_score
+from settlrl_learn.evaluation.elo import anchored_elo, expected_score
 
 
 @pytest.fixture

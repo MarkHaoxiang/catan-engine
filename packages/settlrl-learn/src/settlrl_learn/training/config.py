@@ -131,7 +131,7 @@ class ArenaConfig(_Group):
 
     ``anchor_elos`` pins each anchor opponent's Elo on a fixed scale (``lookahead``
     = the heuristic gate at 0; ``random`` well below); the net's ``arena_elo`` is
-    the MLE on that scale (:mod:`settlrl_learn.training.elo`). Anchors must stay
+    the MLE on that scale (:mod:`settlrl_learn.evaluation.elo`). Anchors must stay
     frozen for a run -- changing them silently shifts every historical number.
     The defaults are calibration-scoped: valid only under the search settings
     (sims/considered/chance_nodes/dev_chance/ordered) the calibration ran with

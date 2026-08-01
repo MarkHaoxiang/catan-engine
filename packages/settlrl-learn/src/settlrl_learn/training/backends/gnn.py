@@ -34,7 +34,7 @@ from settlrl_learn.nn.graph import (
     dims,
 )
 from settlrl_learn.nn.graphnet import GraphNetConfig
-from settlrl_learn.training.backend import Metrics, StepFn
+from settlrl_learn.training.backends.base import Metrics, StepFn
 from settlrl_learn.training.selfplay import Samples
 
 # Flat rows that are setup placements -- a non-setup legal action marks the main
@@ -165,7 +165,7 @@ def _sample_of(item: GNNItem) -> Sample:
 
 
 class GNNBackend:
-    """A :class:`~settlrl_learn.training.backend.Backend` over a ``BoardGNN`` net.
+    """A :class:`~settlrl_learn.training.backends.base.Backend` over a ``BoardGNN`` net.
 
     The setup phase is delegated to a fixed policy (configured here) both during
     self-play and in the arena."""

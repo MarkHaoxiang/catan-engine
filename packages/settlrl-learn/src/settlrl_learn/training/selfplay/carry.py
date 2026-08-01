@@ -4,7 +4,7 @@
 hands back under ``persistent`` and takes back to resume the games in flight; it
 holds the env *object*, so it cannot be serialised as a pytree.
 :class:`PaddedCarry` is the eqx-serialisable projection of it that rides in a
-:class:`~settlrl_learn.training.backend.RunState` -- host-numpy pads of fixed
+:class:`~settlrl_learn.training.backends.base.RunState` -- host-numpy pads of fixed
 shape, PRNG keys as raw uint32 -- with ``to_padded``/``from_padded`` the round
 trip between them (lossless while no lane exceeds the checkpoint pad) and
 ``empty_padded``/``carry_template`` the zero template a deserialisation needs.
@@ -33,7 +33,7 @@ from settlrl_engine.env.batched import (
 from settlrl_engine.mechanics.common import ResultCode
 from settlrl_engine.mechanics.flat import FlatMaskArray
 
-from settlrl_learn.training.backend import Backend
+from settlrl_learn.training.backends.base import Backend
 from settlrl_learn.training.config import LearnConfig
 
 PendingRow = tuple[dict[str, np.ndarray], np.ndarray, np.ndarray, int, float, float]
@@ -109,7 +109,7 @@ class PaddedEnv(NamedTuple):
 
 class PaddedCarry(NamedTuple):
     """A :class:`SelfPlayCarry` as a fixed-shape pytree, so it can ride in an
-    eqx-serialised :class:`~settlrl_learn.training.backend.RunState`.
+    eqx-serialised :class:`~settlrl_learn.training.backends.base.RunState`.
 
     Each recorded key of ``pending`` is host numpy padded to
     ``(batch, pad, *trailing)``, live rows per lane in ``pending_len``;

@@ -12,12 +12,12 @@ from typing import TYPE_CHECKING, Any
 
 import jax
 from pydantic import BaseModel, ConfigDict
+from settlrl_learn.evaluation import NetOpponent
 from settlrl_learn.experiment import Run
 from settlrl_learn.training import (
     ArenaConfig,
     Backend,
     GNNBackend,
-    NetOpponent,
     run_arena,
 )
 

@@ -148,6 +148,17 @@ uses them.
     deliberately *not* normalized here — that would perturb the spatial
     heads' scale relationships, out of scope. v1 is byte-exact (`ctx_norm`
     is `None`, and `_pool`'s v1 branch is untouched).
+    `GraphNetConfig.blocked_linear` (default off; no run adopts it yet)
+    weight-blocks each message/update MLP's first Linear: one matmul per
+    unique input row (vertex / tile / the single global row), gathered onto
+    the edge set, instead of gather-then-transform per edge — the mpnn
+    message's redundant MACs removed. Same parameters (the blocked matmuls
+    slice the existing Linear's weight columns — a checkpoint loads under
+    either flag) and the same function up to float summation order, but NOT
+    bit-exact, so a resume across a flag flip diverges; it ships as an
+    opt-in architecture revision for new runs. `tests/test_blocked_linear.py`
+    pins parameter identity, float32 closeness, the float64 reassociation
+    identity (~1e-14), and the symmetry contracts flag-on.
   - `nn/action_layout.py` — the static map from the flat 662 action space to its
     board structure (per-vertex / -edge / -tile vs. dense "other") + `SCATTER` to
     place a factored head's compact logits back into the flat vector. The
@@ -180,7 +191,7 @@ uses them.
     the inner minibatch loop; `evaluate`; `run_arena`). The loop derives every
     RNG key from `seed` + iteration index and threads it in, so the steps stay
     pure and bit-exact resume is preserved.
-  - `training/backend.py` — the `Backend` protocol (the net-specific surface:
+  - `training/backends/base.py` — the `Backend` protocol (the net-specific surface:
     `init` / `seams` / `play_agent` / `setup_policy` / `observe` / `to_item` /
     `empty_item` / `init_opt` / `make_step` / `eval_metrics`) and `RunState`
     (net + optimiser moments + replay buffer + iteration + best + the self-play
@@ -232,7 +243,7 @@ uses them.
     writes to a sibling `.tmp` and `os.replace`s it into place — atomic, so a
     kill mid-write (the validated long-run procedure) leaves the previous
     checkpoint intact.
-  - `training/selfplay.py::self_play` — batched n-player self-play, the search
+  - `training/selfplay/play.py::self_play` — batched n-player self-play, the search
     (net's or a fixed teacher's) guiding the re-determinizing moves and improved
     policy. The backend's `observe` records the *true* board (net learns the
     belief-averaged value); values are the acting seat's eventual win/loss.
@@ -277,8 +288,8 @@ uses them.
     golden captured pre-change guards the RNG stream and recording order). The
     cost: a persistent call's output is pure in (`seed`, carried state) rather
     than `seed` alone — `seed` seeds only the first call — which is why the
-    carry reaches the checkpoint (`training/carry.py`, below).
-  - `training/carry.py` — the pool types and the projection that checkpoints
+    carry reaches the checkpoint (`training/selfplay/carry.py`, below).
+  - `training/selfplay/carry.py` — the pool types and the projection that checkpoints
     them: `SelfPlayCarry` (live, above), `PaddedCarry`/`PaddedEnv`, the
     `to_padded`/`from_padded` pair and the `empty_padded`/`carry_template` zero
     template, plus `recorded_spec` (the single source of truth for the derived
@@ -346,7 +357,9 @@ uses them.
     statics are all-`None`, so two MLP widths compare equal) — it catches a
     structurally different net reaching an entry, while a same-shape
     different-width net is already separated by its backend's identity.
-  - `training/arena.py::arena` — the net's `ArenaResult(wins, episodes)` vs. a
+- **Evaluation** (`evaluation/`, head-to-head gating of frozen nets; no
+  runtime dependency on `training` — `steps.run_arena` composes it):
+  - `evaluation/arena.py::arena` — the net's `ArenaResult(wins, episodes)` vs. a
     `POLICIES` opponent, seat-swapped at 2p (`lookahead` = the Stage-1 gate;
     `random` = the lower-bound sanity check); the play agent comes from
     `backend.play_agent`. The seat-swap/seed/episode logic lives once, in
@@ -370,7 +383,7 @@ uses them.
     happens between scan windows, so it overshoots) — real `(wins, episodes)`, not
     `winrate * n_games`, feed the Elo MLE. `steps.run_arena` plays each
     `cfg.arena.opponents` entry and reports `arena_winrate` / `arena_vs_<opp>`
-    **plus `arena_elo`** — the MLE Elo (`training/elo.py::anchored_elo`) on the
+    **plus `arena_elo`** — the MLE Elo (`evaluation/elo.py::anchored_elo`) on the
     fixed `cfg.arena.anchor_elos` scale (heuristic pinned at 0 = the gate; random
     well below) — **and `arena_elo_se`**, its standard error (`anchored_elo_se`,
     Fisher information at the MLE).
@@ -433,10 +446,10 @@ uses them.
     benchmark's compile-paying warm-up runs outside the timed region (the
     self-play one via `benchmark.pedantic`'s `setup`), so the headline
     min/mean/median is steady-state throughput.
-  - `training/mlp_backend.py::MLPBackend` — the `AZParams` net over the
+  - `training/backends/mlp.py::MLPBackend` — the `AZParams` net over the
     engineered feature vector; **unmasked** policy CE + value-logistic loss,
     optax adamw, the net plays setup itself.
-  - `training/gnn_backend.py::GNNBackend` — the `BoardGNN` net over the board
+  - `training/backends/gnn.py::GNNBackend` — the `BoardGNN` net over the board
     graph; **masked** policy CE (softmax over the legal set only) + value loss,
     eqx-filtered optax step. `setup_policy` (at `setup_depth <= 1` the
     setup-row-restricted `make_setup_lookahead` opener — under vmap-lockstep
@@ -478,7 +491,7 @@ Techniques aimed at Catan's dice variance (the variance-starved-depth problem):
 - **Playout-cap randomization** (KataGo): most moves a small search, a fraction
   the full budget; only full-search positions contribute policy targets —
   **done** (`selfplay.pcr_full_prob`/`pcr_fast_sims`, mechanics under
-  `training/selfplay.py` above). Pairs with a larger `search.num_simulations`
+  `training/selfplay/play.py` above). Pairs with a larger `search.num_simulations`
   for the full steps — the affordable way to add the search depth the policy
   diagnostic wants.
 

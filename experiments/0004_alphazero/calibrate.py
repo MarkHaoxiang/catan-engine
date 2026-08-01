@@ -3,7 +3,7 @@ policy rungs (``random``/``greedy``/``lookahead``/``mcts``) plus the frozen
 ``az0_gnn96x4`` checkpoint (this framework's arena mid-rung).
 
 The fit holds ``lookahead`` pinned at 0 -- settlrl-learn's arena scale
-(``anchored_elo`` in ``settlrl_learn.training.elo``) -- and coordinate-ascends
+(``anchored_elo`` in ``settlrl_learn.evaluation.elo``) -- and coordinate-ascends
 the logistic MLE over the rest (Zermelo's algorithm / the Bradley-Terry MM
 update: each player's rating is re-solved against its current opponents via
 ``anchored_elo`` itself, which is already that per-player MLE against
@@ -33,9 +33,9 @@ from typing import NamedTuple
 from omegaconf import OmegaConf
 from settlrl_agents import POLICIES, BeliefSpec
 from settlrl_agents.evaluate import evaluate
+from settlrl_learn.evaluation import OpponentSpec
+from settlrl_learn.evaluation.elo import anchored_elo, anchored_elo_se
 from settlrl_learn.experiment import Config, Run, start_run
-from settlrl_learn.training import OpponentSpec
-from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
 
 RUNGS: tuple[str, ...] = ("random", "greedy", "lookahead", "mcts")
 """The ``POLICIES`` rungs in the round-robin (registry names)."""
@@ -178,7 +178,7 @@ def joint_fit(
 ) -> dict[str, float]:
     """Coordinate-ascent joint Elo MLE over a round-robin: hold ``fixed``
     ratings pinned, solve each free player's rating against its current
-    opponents via :func:`~settlrl_learn.training.elo.anchored_elo`, repeat to
+    opponents via :func:`~settlrl_learn.evaluation.elo.anchored_elo`, repeat to
     convergence."""
     idx = _index(results)
     free = sorted(set(idx) - set(fixed))

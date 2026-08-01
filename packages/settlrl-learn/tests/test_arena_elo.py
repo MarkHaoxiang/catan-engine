@@ -10,10 +10,10 @@ from typing import Any, cast
 
 import jax
 from settlrl_agents import POLICIES, BeliefSpec, evaluate
+from settlrl_learn.evaluation.arena import ArenaResult, NetOpponent, arena, arena_spec
+from settlrl_learn.evaluation.elo import anchored_elo, anchored_elo_se
 from settlrl_learn.training import MLPBackend
-from settlrl_learn.training.arena import ArenaResult, NetOpponent, arena, arena_spec
 from settlrl_learn.training.config import ArenaConfig
-from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
 from settlrl_learn.training.steps import run_arena
 
 
@@ -99,9 +99,9 @@ def test_arena_name_path_delegates_to_the_spec_core(monkeypatch: Any) -> None:
         seen.update(kwargs)
         return ArenaResult(wins=1.0, episodes=2)
 
-    # by module object: the training package rebinds `arena` to the function, so
-    # the dotted path does not reach the submodule.
-    arena_module = sys.modules["settlrl_learn.training.arena"]
+    # by module object: the evaluation package rebinds `arena` to the function,
+    # so the dotted path does not reach the submodule.
+    arena_module = sys.modules["settlrl_learn.evaluation.arena"]
     monkeypatch.setattr(arena_module, "arena_spec", _fake_spec_arena)
     res = arena(
         MLPBackend((16,)), object(), opponent="random", n_games=8,
@@ -300,7 +300,7 @@ def test_run_arena_reuses_the_compiled_callables() -> None:
     # Two run_arena rounds over one backend: the second builds no new callable
     # (counted at the builder, not the clock) and returns equal metrics -- the
     # cached-callable path must reproduce the cold-built one exactly.
-    arena_module = sys.modules["settlrl_learn.training.arena"]
+    arena_module = sys.modules["settlrl_learn.evaluation.arena"]
     backend = MLPBackend((16,))
     net = backend.init(jax.random.key(1))
     cfg = ArenaConfig(

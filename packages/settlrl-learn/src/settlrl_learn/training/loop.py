@@ -3,7 +3,7 @@
 Each iteration self-plays under the current net (or a fixed teacher during the
 warm-up), buffers the positions into a flashbax on-device replay, trains, and --
 once past the warm-up -- scores the net vs. ``lookahead(heuristic)``. The
-:class:`~settlrl_learn.training.backend.Backend` supplies everything net-specific;
+:class:`~settlrl_learn.training.backends.base.Backend` supplies everything net-specific;
 this loop is shared by the flat-MLP and board-GNN paths.
 
 :func:`learn` takes a single :class:`~settlrl_learn.training.config.LearnConfig`
@@ -37,22 +37,22 @@ from settlrl_search import (
     make_search_weights_value,
 )
 
-from settlrl_learn.training.arena import NetOpponent, OpponentSpec
-from settlrl_learn.training.backend import (
+from settlrl_learn.evaluation.arena import NetOpponent, OpponentSpec
+from settlrl_learn.training.backends.base import (
     Backend,
     RunState,
     load_run_state,
     save_run_state,
 )
-from settlrl_learn.training.carry import (
+from settlrl_learn.training.config import LearnConfig
+from settlrl_learn.training.selfplay import Samples, SelfPlayStats, self_play
+from settlrl_learn.training.selfplay.carry import (
     PaddedCarry,
     SelfPlayCarry,
     carry_template,
     from_padded,
     to_padded,
 )
-from settlrl_learn.training.config import LearnConfig
-from settlrl_learn.training.selfplay import Samples, SelfPlayStats, self_play
 from settlrl_learn.training.steps import (
     evaluate,
     make_optimizer,

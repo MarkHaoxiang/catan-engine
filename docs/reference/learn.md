@@ -38,3 +38,7 @@ training loop that produces them.
 ## Training loop
 
 ::: settlrl_learn.training
+
+## Evaluation
+
+::: settlrl_learn.evaluation

@@ -38,7 +38,7 @@ from settlrl_engine.env import flat_to_action
 from settlrl_search import PolicyWeights, PolicyWeightsValue
 from settlrl_search.policy import BeliefPolicy
 
-from settlrl_learn.training.carry import (
+from settlrl_learn.training.selfplay.carry import (
     DERIVED_KEYS,
     PendingRow,
     SelfPlayCarry,

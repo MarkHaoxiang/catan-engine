@@ -24,9 +24,9 @@ from jaxtyping import Array
 from settlrl_engine.env import N_FLAT
 from settlrl_learn.nn.graphnet import PRESETS
 from settlrl_learn.training import GNNBackend, MLPBackend
-from settlrl_learn.training.carry import from_padded, to_padded
-from settlrl_learn.training.gnn_backend import _SETUP_ROWS
+from settlrl_learn.training.backends.gnn import _SETUP_ROWS
 from settlrl_learn.training.selfplay import Samples, self_play
+from settlrl_learn.training.selfplay.carry import from_padded, to_padded
 
 
 def test_self_play_samples_shape_under_uniform_policy() -> None:

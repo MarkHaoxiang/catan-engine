@@ -22,8 +22,8 @@ import wandb
 from omegaconf import OmegaConf
 from settlrl_learn.experiment import Run
 from settlrl_learn.nn.graph import Sample
+from settlrl_learn.training.backends.gnn import GNNBackend, GNNItem
 from settlrl_learn.training.config import OptimConfig
-from settlrl_learn.training.gnn_backend import GNNBackend, GNNItem
 from settlrl_learn.training.steps import make_optimizer, prepare_targets
 
 _ALPHAZERO_DIR = Path(__file__).resolve().parents[1] / "0004_alphazero"

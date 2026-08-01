@@ -38,7 +38,7 @@ from settlrl_learn.nn.architectures import DeepSetModel, GNNModel, MLPModel
 from settlrl_learn.nn.board_gnn import BoardGNN
 from settlrl_learn.nn.graph import Sample, board_sample
 from settlrl_learn.nn.graphnet import PRESETS, GraphNet
-from settlrl_learn.training.gnn_backend import gnn_loss
+from settlrl_learn.training.backends.gnn import gnn_loss
 from settlrl_search.rows import ROW_TYPE
 
 _OUT, _W = 4, 8
@@ -463,7 +463,7 @@ def test_gnn_loss_masks_policy_by_train_policy() -> None:
 
 def test_gnn_loss_all_zero_train_policy_is_finite() -> None:
     # PCR can produce a batch with no full-search (train_policy=1) rows -- the
-    # `jnp.maximum(sum(train_policy), 1.0)` guard (gnn_backend.py) must keep the
+    # `jnp.maximum(sum(train_policy), 1.0)` guard (backends/gnn.py) must keep the
     # policy loss at a defined 0, not divide 0/0 into NaN.
     net = _aznet()
     samples, target, mask = _pcr_batch(4, seed=3)

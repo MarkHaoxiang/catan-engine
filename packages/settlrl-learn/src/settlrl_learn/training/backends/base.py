@@ -3,8 +3,8 @@
 A :class:`Backend` bundles everything net-specific: how to build the net, adapt
 it to the search seams and a play agent, turn board positions into replay items,
 and run one optimiser step / eval. :mod:`settlrl_learn.training.loop` is otherwise
-net-agnostic, so the flat-MLP (:class:`~settlrl_learn.training.mlp_backend.MLPBackend`)
-and board-GNN (:class:`~settlrl_learn.training.gnn_backend.GNNBackend`) paths share
+net-agnostic, so the flat-MLP (:class:`~settlrl_learn.training.backends.mlp.MLPBackend`)
+and board-GNN (:class:`~settlrl_learn.training.backends.gnn.GNNBackend`) paths share
 one loop.
 
 :class:`RunState` is the whole mutable run state, eqx-serialised for **bit-exact
@@ -110,7 +110,7 @@ class RunState(NamedTuple):
     buffer_state: Any  # flashbax buffer state pytree
     iteration: Int[Array, ""]  # iterations completed
     best: Float[Array, ""]  # best arena win rate so far
-    selfplay_carry: Any  # settlrl_learn.training.carry.PaddedCarry
+    selfplay_carry: Any  # settlrl_learn.training.selfplay.carry.PaddedCarry
 
 
 _PRE_CARRY_FIELDS = RunState._fields.index("selfplay_carry")

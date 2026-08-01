@@ -23,7 +23,7 @@ from settlrl_search.policy import BeliefPolicy, PolicyPrior
 
 from settlrl_learn.features import FEATURE_DIM, features
 from settlrl_learn.nn.mlp import AZParams, az_forward, init_az_params, make_az
-from settlrl_learn.training.backend import Metrics, StepFn
+from settlrl_learn.training.backends.base import Metrics, StepFn
 from settlrl_learn.training.selfplay import Samples
 
 
@@ -57,7 +57,7 @@ def mlp_loss(
 
 
 class MLPBackend:
-    """A :class:`~settlrl_learn.training.backend.Backend` over an ``AZParams`` net."""
+    """A :class:`~settlrl_learn.training.backends.base.Backend` over an ``AZParams`` net."""
 
     def __init__(
         self,

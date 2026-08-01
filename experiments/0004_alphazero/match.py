@@ -2,7 +2,7 @@
 between two GNN net refs, at one shared search budget.
 
 A lab tool, not a product: it reuses
-``settlrl_learn.training.arena.arena_spec`` (the loop's own seat-swapped-pair
+``settlrl_learn.evaluation.arena.arena_spec`` (the loop's own seat-swapped-pair
 mechanics) and ``settlrl_agents.evaluate`` underneath it, no new match
 machinery.
 
@@ -173,7 +173,8 @@ def run_match(
     head-to-head against ``net_b`` (``arena_spec``'s own mechanics: same seed
     scheme for both seatings, real completed-game counts)."""
     from settlrl_agents import BeliefSpec
-    from settlrl_learn.training import GNNBackend, arena_spec
+    from settlrl_learn.evaluation import arena_spec
+    from settlrl_learn.training import GNNBackend
 
     sem = _scale_defaults()
     a = load_net(net_a_ref)

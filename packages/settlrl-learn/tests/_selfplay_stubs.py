@@ -11,7 +11,7 @@ import jax.numpy as jnp
 from jaxtyping import Array
 from settlrl_engine.belief import belief_view
 from settlrl_engine.board.layout import BoardLayout
-from settlrl_learn.training.backend import Backend
+from settlrl_learn.training.backends.base import Backend
 
 
 def uniform_weights(

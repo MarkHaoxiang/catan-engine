@@ -19,8 +19,9 @@ from settlrl_learn.training import (
     SelfPlayConfig,
     ValueBlendConfig,
 )
-from settlrl_learn.training.backend import load_run_state, save_run_state
-from settlrl_learn.training.carry import (
+from settlrl_learn.training.backends.base import load_run_state, save_run_state
+from settlrl_learn.training.selfplay import self_play
+from settlrl_learn.training.selfplay.carry import (
     PaddedEnv,
     SelfPlayCarry,
     carry_template,
@@ -28,7 +29,6 @@ from settlrl_learn.training.carry import (
     from_padded,
     to_padded,
 )
-from settlrl_learn.training.selfplay import self_play
 
 
 def _mid_game_carry(

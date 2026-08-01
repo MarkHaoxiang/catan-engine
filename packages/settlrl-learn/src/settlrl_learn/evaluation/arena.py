@@ -12,7 +12,7 @@ A training-side module: not imported by the package root.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import equinox as eqx
 from settlrl_agents import POLICIES, BeliefSpec, evaluate
@@ -20,7 +20,8 @@ from settlrl_agents.evaluate import EvalResult, compile_evaluate
 from settlrl_search.policy import OpponentSpec as OpponentSpec
 from settlrl_search.policy import StatefulSpec
 
-from settlrl_learn.training.backend import Backend
+if TYPE_CHECKING:
+    from settlrl_learn.training.backends.base import Backend
 
 
 class ArenaResult(NamedTuple):
