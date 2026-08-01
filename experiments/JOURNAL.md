@@ -318,3 +318,22 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   summation order (float64 identity residual 7.1e-15), NOT bit-exact across
   a flag flip — new runs only. Adoption + a pinned-gate quote deferred to
   the next architecture-study run that threads the flag.
+- blocked linears adopted unconditionally, flag deleted (2026-08-01). The
+  float64 reassociation residual (7.1e-15) proves blocked and unblocked are
+  the same function up to float summation order with identical parameters,
+  so per the no-dead-code guideline (root CLAUDE.md) the old form goes
+  rather than gaining a flag: the
+  gather-then-transform path and `GraphNetConfig.blocked_linear` are deleted,
+  weight-blocked first Linears are the only formulation, and every
+  checkpoint/anchor loads unchanged (the blocked matmuls slice the same
+  Linear weights). Pinned hetero gauge (bench_throughput_hetero, B=512
+  ruler, bench.repeats=2): 770.94 → **911.72 samples/s (+18.3%)**
+  (runs/0004_alphazero/2026-08-01T174013Z → .../2026-08-01T205749Z; run
+  noise ~±1.7% per the 174739Z repeat, so the win is far clear). GNN forward
+  bits shift at float32 rounding level everywhere (self-play, arena, anchor
+  evaluations) — accepted; a resume across the boundary diverges like any
+  reassociation. `tests/test_blocked_linear.py`'s flag comparison is
+  reworked as `tests/test_message_linears.py`: the proof now pins against
+  an in-test naive gather-concat-transform reference over the same modules
+  (float32 closeness on a real board, float64 identity ≤ 1e-12, parameter
+  identity via the un-sliced weight).

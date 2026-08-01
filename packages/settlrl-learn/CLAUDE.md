@@ -145,18 +145,20 @@ uses them.
     deliberately *not* normalized here — that would perturb the spatial
     heads' scale relationships, out of scope. v1 is byte-exact (`ctx_norm`
     is `None`, and `_pool`'s v1 branch is untouched).
-    `GraphNetConfig.blocked_linear` (default off; no run adopts it yet)
-    weight-blocks each message/update MLP's first Linear: one matmul per
-    unique input row (vertex / tile / the single global row), gathered onto
-    the edge set, instead of gather-then-transform per edge (perf evidence:
-    the 2026-08-01 blocked_linear line in experiments/JOURNAL.md). Same
-    parameters (the blocked matmuls slice the existing Linear's weight
-    columns — a checkpoint loads under either flag) and the same function up
-    to float summation order, but NOT bit-exact, so a resume across a flag
-    flip diverges; it ships as an opt-in architecture revision for new runs.
-    `tests/test_blocked_linear.py` pins parameter identity, float32
-    closeness, the float64 reassociation identity (asserted 1e-12, observed
-    ~7e-15), and the symmetry contracts flag-on.
+    Each message/update MLP's first Linear is weight-blocked
+    (`graphnet._blocked_mlp`): one matmul per unique input row (vertex /
+    tile / the single global row), gathered onto the pair set, rather than
+    gather-then-transform per pair (perf evidence: the 2026-08-01
+    blocked_linear JOURNAL lines, incl. the pinned adoption gauge
+    quote). The blocked matmuls slice the
+    Linear's weight columns, so the parameters are exactly the
+    gather-then-transform form's — every checkpoint and frozen anchor loads
+    unchanged — and the function is the same up to float summation order
+    (float64 reassociation residual ~7e-15).
+    `tests/test_message_linears.py` pins it against an in-test naive
+    gather-concat-transform reference over the same modules: float32
+    closeness on a real board, the float64 identity (asserted 1e-12), and
+    parameter identity (the naive matmul consumes the same weight whole).
   - `nn/action_layout.py` — the static map from the flat 662 action space to its
     board structure (per-vertex / -edge / -tile vs. dense "other") + `SCATTER` to
     place a factored head's compact logits back into the flat vector. The

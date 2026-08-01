@@ -37,16 +37,13 @@ Levers (``GraphNetConfig``):
 - ``incidence`` -- a ``feature_version>=2`` option: widen the node features with
   each vertex's incident-hex block (:func:`settlrl_learn.nn.graph.board_sample`'s
   own flag, which every sample feeding this net must match). Wider encoder input,
-  no architecture change -- the structure-free alternative to ``hetero``;
-- ``blocked_linear`` -- weight-blocked message passing: each message/update
-  MLP's first Linear is computed once per *unique* input row (per vertex /
-  tile / the one global row) and gathered onto the edge set, instead of
-  gathering rows and transforming per edge. Same weights, same function up to
-  float summation order -- NOT bit-exact against the flag-off composition, so
-  it is an architecture revision for new runs (a checkpoint's weights load
-  under either flag, but a resume across a flag flip diverges). Under
-  ``conv="gat"`` the attention/value projections are untouched -- only the
-  node update (and the hetero messages) block.
+  no architecture change -- the structure-free alternative to ``hetero``.
+
+The message and node-update MLPs' first Linears are weight-blocked (``_blocked_mlp``):
+computed once per *unique* input row (per vertex / tile / the one global row)
+and gathered onto the pair set. Under ``conv="gat"`` the attention/value
+projections are plain per-edge Linears -- only the node update (and the hetero
+messages) block.
 """
 
 from __future__ import annotations
@@ -79,9 +76,6 @@ class GraphNetConfig(NamedTuple):
     hetero: bool = False  # add HEX/TILE nodes + vertex<->hex message passing
     feature_version: int = 1  # graph.FEATURE_VERSIONS: the board featurization
     incidence: bool = False  # v2 option: per-vertex incident-hex features
-    # first Linears computed per unique row then gathered -- same weights and
-    # function, reassociated sums (not bit-exact vs. off; new runs only).
-    blocked_linear: bool = False
 
 
 def _aggr(messages: Float[Array, "e w"]) -> Float[Array, "v w"]:
@@ -219,7 +213,7 @@ class _Layer(eqx.Module):
             alpha = jraph.segment_softmax(score, RECEIVERS, num_segments=N_VERTICES)
             value = jax.vmap(self.val_w)(hs).reshape(-1, self.cfg.heads, d)
             msg = (alpha[..., None] * value).reshape(-1, self.cfg.width)
-        elif self.cfg.blocked_linear:
+        else:
             assert self.msg is not None
             blocks: list[tuple[Array, Array | None]] = [
                 (h, SENDERS),
@@ -229,13 +223,6 @@ class _Layer(eqx.Module):
             if self.cfg.global_node:
                 blocks.append((g, None))
             msg = _blocked_mlp(self.msg, blocks)
-        else:
-            assert self.msg is not None
-            hs, hr = h[SENDERS], h[RECEIVERS]
-            parts = [hs, hr, e]
-            if self.cfg.global_node:
-                parts.append(jnp.broadcast_to(g, (hs.shape[0], g.shape[0])))
-            msg = jax.vmap(self.msg)(jnp.concatenate(parts, axis=-1))
         return _aggr(msg)
 
     def __call__(
@@ -249,35 +236,24 @@ class _Layer(eqx.Module):
         parts = [h, agg_vv]
         if self.cfg.hetero:
             assert h_t is not None and self.msg_tv is not None
-            if self.cfg.blocked_linear:
-                m_tv = _blocked_mlp(self.msg_tv, [(h_t, VT_T), (h, VT_V)])
-            else:
-                m_tv = jax.vmap(self.msg_tv)(jnp.concatenate([h_t[VT_T], h[VT_V]], -1))
+            m_tv = _blocked_mlp(self.msg_tv, [(h_t, VT_T), (h, VT_V)])
             agg_tv = jraph.segment_sum(m_tv, VT_V, num_segments=N_VERTICES)
             parts.append(agg_tv)
-        if self.cfg.blocked_linear:
-            # the per-vertex inputs share one matmul block; g's contribution is
-            # one row, broadcast-added inside the blocked first Linear.
-            node_blocks: list[tuple[Array, Array | None]] = [
-                (jnp.concatenate(parts, axis=-1), None)
-            ]
-            if self.cfg.global_node:
-                node_blocks.append((g, None))
-            delta = _blocked_mlp(self.node, node_blocks)
-        else:
-            if self.cfg.global_node:
-                parts.append(jnp.broadcast_to(g, (h.shape[0], g.shape[0])))
-            delta = jax.vmap(self.node)(jnp.concatenate(parts, axis=-1))
+        # the per-vertex inputs share one matmul block; g's contribution is
+        # one row, broadcast-added inside the blocked first Linear.
+        node_blocks: list[tuple[Array, Array | None]] = [
+            (jnp.concatenate(parts, axis=-1), None)
+        ]
+        if self.cfg.global_node:
+            node_blocks.append((g, None))
+        delta = _blocked_mlp(self.node, node_blocks)
         h_new = h + delta if self.cfg.residual else delta
         h_new = _apply_norm(self.norm, h_new)
 
         # tile (hex) update reads the PRE-update vertex states.
         if self.cfg.hetero:
             assert h_t is not None and self.msg_vt is not None and self.tile is not None
-            if self.cfg.blocked_linear:
-                m_vt = _blocked_mlp(self.msg_vt, [(h, VT_V), (h_t, VT_T)])
-            else:
-                m_vt = jax.vmap(self.msg_vt)(jnp.concatenate([h[VT_V], h_t[VT_T]], -1))
+            m_vt = _blocked_mlp(self.msg_vt, [(h, VT_V), (h_t, VT_T)])
             agg_vt = jraph.segment_sum(m_vt, VT_T, num_segments=N_TILES)
             delta_t = jax.vmap(self.tile)(jnp.concatenate([h_t, agg_vt], -1))
             h_t_upd = h_t + delta_t if self.cfg.residual else delta_t
