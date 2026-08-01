@@ -249,3 +249,10 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   az2 gate pass) in ~20 GPU-min vs ~8 GPU-h. Caveats: the teacher is itself
   `gn_hetero` (teacher–student architecture match may inflate the hetero
   edge), and this is one calibration pair, not a validation set.
+- 0004 bench_throughput_hetero baseline minted (2026-08-01). Pinned self-play
+  throughput for the adopted hetero recipe (az2_hetero96x4 anchor, v2 training
+  shape: persistent pool, B=512, 128 sims, no PCR — bench_selfplay rejects the
+  PCR mix): **675.36 samples/s** (475.32 moves/s, 60841 sims/s, discard 0,
+  RTX 5090; run runs/0004_alphazero/2026-08-01T154603Z) — the hetero track's
+  before number. The gn_global pin (bench_throughput, az0, B=256/64 sims)
+  stays valid for its own recipe.

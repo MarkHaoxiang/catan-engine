@@ -1,0 +1,31 @@
+# @package _global_
+# Pinned self-play throughput benchmark for the adopted hetero recipe: the
+# v2_* training shape (persistent pool, batch 512, 128 sims, opening anneal)
+# at the frozen az2 anchor. Compare result.json across commits; never a gate.
+# The gn_global pin (bench_throughput.yaml) stays valid for its own recipe.
+# pcr_full_prob=1.0 because bench_selfplay rejects PCR (it breaks the
+# sims-per-move accounting) -- this pin measures full-128-sim persistent
+# self-play, a regression detector, not the production PCR mix.
+defaults:
+  - override /net: gnn_hetero
+net:
+  width: 96
+  layers: 4
+  feature_version: 2
+mode: bench
+bench:
+  anchor: az2_hetero96x4
+  repeats: 5
+selfplay:
+  samples: 16384
+  batch: 512
+  persistent: true
+  temperature_moves: 30
+  pcr_full_prob: 1.0
+search:
+  num_simulations: 128
+  max_considered: 16
+  expected_rolls: false
+  chance_nodes: false
+wandb:
+  mode: disabled
