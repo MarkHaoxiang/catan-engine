@@ -149,14 +149,15 @@ uses them.
     `GraphNetConfig.blocked_linear` (default off; no run adopts it yet)
     weight-blocks each message/update MLP's first Linear: one matmul per
     unique input row (vertex / tile / the single global row), gathered onto
-    the edge set, instead of gather-then-transform per edge — the mpnn
-    message's redundant MACs removed. Same parameters (the blocked matmuls
-    slice the existing Linear's weight columns — a checkpoint loads under
-    either flag) and the same function up to float summation order, but NOT
-    bit-exact, so a resume across a flag flip diverges; it ships as an
-    opt-in architecture revision for new runs. `tests/test_blocked_linear.py`
-    pins parameter identity, float32 closeness, the float64 reassociation
-    identity (~1e-14), and the symmetry contracts flag-on.
+    the edge set, instead of gather-then-transform per edge (perf evidence:
+    the 2026-08-01 blocked_linear line in experiments/JOURNAL.md). Same
+    parameters (the blocked matmuls slice the existing Linear's weight
+    columns — a checkpoint loads under either flag) and the same function up
+    to float summation order, but NOT bit-exact, so a resume across a flag
+    flip diverges; it ships as an opt-in architecture revision for new runs.
+    `tests/test_blocked_linear.py` pins parameter identity, float32
+    closeness, the float64 reassociation identity (asserted 1e-12, observed
+    ~7e-15), and the symmetry contracts flag-on.
   - `nn/action_layout.py` — the static map from the flat 662 action space to its
     board structure (per-vertex / -edge / -tile vs. dense "other") + `SCATTER` to
     place a factored head's compact logits back into the flat vector. The

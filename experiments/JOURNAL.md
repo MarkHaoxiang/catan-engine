@@ -309,3 +309,12 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   move-for-move CPU bit-identity over real games (both descent machines,
   2p + 3p). GPU search-step micro: 324.6→316.5 ms at B=64 / 930.3→921.1 ms
   at B=256 (~1–2.5%).
+- blocked_linear landed (2026-08-01): `GraphNetConfig.blocked_linear`
+  weight-blocks the message/update MLPs' first Linears (one matmul per unique
+  input row, gathered) — default off, no adopter yet. GPU micros (scratchpad
+  harness, NOT the pinned bench_throughput gate): hetero-v2 96x4 forward
+  B=512 4.6→2.8 ms (−38%); production-semantics search step B=512/sims=128
+  968→854 ms (−12%); two runs each. Same weights, same function up to float
+  summation order (float64 identity residual 7.1e-15), NOT bit-exact across
+  a flag flip — new runs only. Adoption + a pinned-gate quote deferred to
+  the next architecture-study run that threads the flag.
