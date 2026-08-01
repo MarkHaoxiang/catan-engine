@@ -21,7 +21,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from conftest import heuristic_value
+from _heuristic_leaf import heuristic_value
 from settlrl_engine.belief import BeliefView
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, KeyScalar, Player

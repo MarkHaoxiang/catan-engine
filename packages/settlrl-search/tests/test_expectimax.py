@@ -12,7 +12,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import numpy as np
-from conftest import heuristic_value
+from _heuristic_leaf import heuristic_value
 from settlrl_engine.belief import belief_view
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, GamePhase, Player
