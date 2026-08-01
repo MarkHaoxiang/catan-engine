@@ -327,8 +327,22 @@ uses them.
     `POLICIES` opponent, seat-swapped at 2p (`lookahead` = the Stage-1 gate;
     `random` = the lower-bound sanity check); the play agent comes from
     `backend.play_agent`. The seat-swap/seed/episode logic lives once, in
-    `arena_spec`, which takes a **pre-built** opponent spec; `arena` is the
-    name-based wrapper that resolves `POLICIES`. `episodes` is the real
+    `arena_spec`, which takes a **pre-built** opponent spec or a `NetOpponent`
+    (a frozen net + its backend); `arena` is the name-based wrapper that
+    resolves `POLICIES`. Each seating's evaluate callable is **memoised**
+    (`arena._EVAL_CACHE`, keyed on backend identity + opponent identity + seat
+    order + sims/considered/batch; mirrors `loop._CALLABLES_CACHE`'s mechanics
+    — id-keyed, referents held alive in the value, a net-static guard) over
+    `settlrl_agents.evaluate.compile_evaluate`, with the current net's *and* a
+    `NetOpponent`'s arrays as traced arguments — so an arena round retraces
+    nothing after its first firing (previously ~2 fused-scan recompiles per
+    opponent per round every round, the fresh-closure retrace: production
+    round at the scale config measured 548.5 s cold → 363.0 s cached,
+    2026-08-01, vs 521.2 s/round pre-change where every round paid the
+    compiles). Bit-identity with the plain `evaluate` composition is pinned
+    by `test_arena_spec_matches_the_plain_evaluate_composition`; a
+    `StatefulSpec` opponent falls back to the uncached stepwise driver
+    (nothing fused to cache). `episodes` is the real
     completed-game count, not the requested `n_games` (`evaluate`'s win-count sync
     happens between scan windows, so it overshoots) — real `(wins, episodes)`, not
     `winrate * n_games`, feed the Elo MLE. `steps.run_arena` plays each
@@ -341,10 +355,12 @@ uses them.
     `run_arena`'s `round_index` isn't a multiple of N, saving wall-clock on
     anchors that no longer carry information (e.g. `random`, which pins at 1.0
     winrate early). **Frozen checkpoints join the gauntlet** through
-    `learn(..., net_opponents={name: (spec, elo, every, phase)})` → `run_arena`: ready
-    play specs, so the library never learns about checkpoint files or
-    architectures — the experiment composes them (0004's `anchors.load_anchor`
-    + `GNNBackend.play_agent`; the frozen ladder is three rungs — az0 −58 /
+    `learn(..., net_opponents={name: (opponent, elo, every, phase)})` →
+    `run_arena`: ready specs or `NetOpponent`s, so the library never learns
+    about checkpoint files or architectures — the experiment composes them
+    (0004's `anchors.load_anchor` + a pinned-setup `GNNBackend` wrapped as
+    `NetOpponent`, keeping the rung's arrays traced-arg rather than
+    closure-baked; the frozen ladder is three rungs — az0 −58 /
     az1 +109.86 / az2 +186.76, all in `experiments/0004_alphazero/anchors/`,
     seated via `net_opponents` in `conf/arena/scale.yaml`. az0's Elo is
     calibrated by a joint round-robin MLE —

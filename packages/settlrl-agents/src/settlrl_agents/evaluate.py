@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable, Sequence
-from typing import Literal, NamedTuple, cast
+from typing import Any, Literal, NamedTuple, cast
 
 import jax
 import jax.numpy as jnp
@@ -18,7 +19,12 @@ from settlrl_engine.env import (
     flat_to_action,
     observe_for,
 )
-from settlrl_engine.env.batched import Actor, AgentSelectionArray
+
+# `_rollout_core` (the engine's fused rollout body, private): compile_evaluate
+# rebuilds the actor from *traced* agent parameters inside its own jit, which
+# the public `BatchedSettlrlEnv.rollout` (actor identity static, closures
+# baked) cannot express. Kept beside `evaluate` so the two paths cannot drift.
+from settlrl_engine.env.batched import Actor, AgentSelectionArray, _rollout_core
 from settlrl_engine.mechanics.flat import FlatMaskArray
 from settlrl_search.policy import (
     AgentSpec,
@@ -269,3 +275,106 @@ def evaluate(
         if n_episodes is not None and int(wins.sum()) >= n_episodes:
             break
     return EvalResult(wins=wins, episodes=int(wins.sum()))
+
+
+def compile_evaluate(
+    make_agents: Callable[[Any], Sequence[ObservationSpec | BeliefSpec | Policy]],
+    *,
+    batch_size: int = 64,
+    number_placement: Literal["random", "spiral"] = "random",
+) -> Callable[..., EvalResult]:
+    """:func:`evaluate`'s fused path, compiled once over traced agent parameters.
+
+    Returns ``run(params, *, n_steps=None, n_episodes=None, seed=0) ->
+    EvalResult``, bit-identical to ``evaluate(make_agents(params), ...)`` at
+    the same budget/seed. ``make_agents`` is called *inside* the compiled
+    rollout with ``params`` (any pytree) as traced arrays, so repeated ``run``
+    calls with new arrays of the same structure reuse the compiled scan --
+    a plain ``evaluate`` call rebuilds its actor closure and retraces instead.
+    ``make_agents`` must return the same seating structure for any ``params``
+    and pure (non-stateful) agents only."""
+
+    @functools.partial(
+        jax.jit,
+        static_argnames=(
+            "n",
+            "n_steps",
+            "reward_mode",
+            "auto_reset",
+            "victory_points_to_win",
+        ),
+    )
+    def _window(
+        params: Any,
+        carry: Any,
+        sample_key: KeyScalar,
+        *,
+        n: int,
+        n_steps: int,
+        reward_mode: str,
+        auto_reset: bool,
+        victory_points_to_win: int,
+    ) -> tuple[Any, Float[Array, "batch seats"]]:
+        layout, state, avail, vps, belief, extras, env_key = carry
+        agents = make_agents(params)
+        actor = _actor([_picker(a, n, i) for i, a in enumerate(agents)])
+        out = _rollout_core(
+            layout, state, avail, vps, belief, extras, env_key, sample_key,
+            n_steps, actor, batch_size, reward_mode, auto_reset,
+            number_placement, n, victory_points_to_win,
+        )  # fmt: skip
+        return out[:7], out[7]
+
+    def run(
+        params: Any,
+        *,
+        n_steps: int | None = None,
+        n_episodes: int | None = None,
+        seed: int = 0,
+    ) -> EvalResult:
+        if (n_steps is None) == (n_episodes is None):
+            raise ValueError("provide exactly one of n_steps / n_episodes")
+        agents = make_agents(params)
+        n = len(agents)
+        for i, a in enumerate(agents):
+            if isinstance(a, StatefulSpec):
+                raise ValueError(f"seat {i} is stateful; compile_evaluate fuses")
+            if isinstance(a, AgentSpec) and n not in a.n_players:
+                raise ValueError(f"seat {i} does not support {n}-player games")
+        env = BatchedSettlrlEnv(
+            batch_size=batch_size,
+            seed=seed,
+            reward="sparse",
+            n_players=n,
+            number_placement=number_placement,
+            track_beliefs=any(isinstance(a, BeliefSpec) for a in agents),
+        )
+        carry = (
+            env._layout, env._state, env._avail, env._vps, env._belief,
+            (env._reward, env._terminations, env._result, env._agent_sel),
+            env._key,
+        )  # fmt: skip
+        key = jax.random.key(seed)
+        wins = jnp.zeros((n,), jnp.float32)
+        total = (
+            n_steps
+            if n_steps is not None
+            else _MAX_STEPS_PER_EPISODE * ((n_episodes or 0) // batch_size + 1)
+        )
+        done = 0
+        while done < total:
+            window = min(_SYNC_WINDOW, total - done)
+            key, k = jax.random.split(key)
+            carry, cum = _window(
+                params, carry, k,
+                n=n, n_steps=window, reward_mode=env.reward_mode,
+                auto_reset=env.auto_reset,
+                victory_points_to_win=env.victory_points_to_win,
+            )  # fmt: skip
+            wins = wins + cum.sum(axis=0)
+            done += window
+            if n_episodes is not None and int(wins.sum()) >= n_episodes:
+                break
+        return EvalResult(wins=wins, episodes=int(wins.sum()))
+
+    return run

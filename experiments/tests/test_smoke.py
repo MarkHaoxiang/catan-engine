@@ -237,14 +237,18 @@ def test_0004_scale_arena_names_the_az0_rung() -> None:
 
 
 def test_0004_builds_net_opponent_specs() -> None:
-    # Composition only: the named anchor loads and becomes a seatable spec at the
-    # arena's budget (no game is played -- that is a GPU-scale cost).
+    # Composition only: the named anchor loads and becomes a seatable
+    # NetOpponent -- its net deserialized and its backend pinned to the frozen
+    # setup semantics (no game is played -- that is a GPU-scale cost).
+    from settlrl_learn.training import GNNBackend, NetOpponent
+
     run = load_run("0004_alphazero")
     cfg = run.compose_config(["+experiment=small"])
     opponents = run.build_net_opponents(cfg)
-    spec, elo, every, phase = opponents["az0_gnn96x4"]
+    opp, elo, every, phase = opponents["az0_gnn96x4"]
     assert (elo, every, phase) == (-58.0, 3, 0)
-    assert 2 in spec.n_players and callable(spec.policy)
+    assert isinstance(opp, NetOpponent) and isinstance(opp.backend, GNNBackend)
+    assert opp.net is not None and opp.backend.setup_depth == 1
 
 
 def test_0004_final_gauntlet_neutralizes_schedules(

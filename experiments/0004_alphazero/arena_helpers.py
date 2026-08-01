@@ -12,9 +12,14 @@ from typing import TYPE_CHECKING, Any
 
 import jax
 from pydantic import BaseModel, ConfigDict
-from settlrl_agents import BeliefSpec
 from settlrl_learn.experiment import Run
-from settlrl_learn.training import ArenaConfig, Backend, GNNBackend, run_arena
+from settlrl_learn.training import (
+    ArenaConfig,
+    Backend,
+    GNNBackend,
+    NetOpponent,
+    run_arena,
+)
 
 if TYPE_CHECKING:
     # deferred (see `from __future__ import annotations`): avoids a runtime
@@ -34,10 +39,11 @@ class BenchConfig(BaseModel):
 
 def build_net_opponents(
     cfg: AlphaZeroConfig,
-) -> dict[str, tuple[BeliefSpec, float, int, int]]:
-    """The specs `learn` seats for ``cfg.arena.net_opponents``: each named anchor
-    loaded from ``anchors/`` and played by its own GNN search at the arena's
-    budget, under the calibration's frozen setup opener
+) -> dict[str, tuple[NetOpponent, float, int, int]]:
+    """The opponents `learn` seats for ``cfg.arena.net_opponents``: each named
+    anchor loaded from ``anchors/`` as a ``NetOpponent`` -- played by its own
+    GNN search at the arena's budget (its arrays traced into the memoised
+    arena callable) under the calibration's frozen setup opener
     (``anchors.NET_OPPONENT_SETUP_*``) and this run's search semantics."""
     # same-dir sibling module (see run_bench's note on sys.path).
     from anchors import (
@@ -48,7 +54,7 @@ def build_net_opponents(
     )
 
     s = cfg.search
-    out: dict[str, tuple[BeliefSpec, float, int, int]] = {}
+    out: dict[str, tuple[NetOpponent, float, int, int]] = {}
     for name, opp in cfg.arena.net_opponents.items():
         net, netcfg = load_anchor(name)
         backend = GNNBackend(
@@ -57,17 +63,7 @@ def build_net_opponents(
             setup_beam=NET_OPPONENT_SETUP_BEAM,
             chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
         )  # fmt: skip
-        agent = backend.play_agent(
-            net,
-            num_simulations=cfg.arena.sims,
-            max_num_considered_actions=cfg.arena.considered,
-        )
-        out[name] = (
-            BeliefSpec(lambda agent=agent: agent, frozenset((2,))),
-            opp.elo,
-            opp.every,
-            opp.phase,
-        )
+        out[name] = (NetOpponent(backend, net), opp.elo, opp.every, opp.phase)
     return out
 
 
@@ -75,7 +71,7 @@ def run_final_gauntlet(
     backend: Backend,
     net: Any,
     cfg: AlphaZeroConfig,
-    net_opponents: dict[str, tuple[BeliefSpec, float, int, int]],
+    net_opponents: dict[str, tuple[NetOpponent, float, int, int]],
 ) -> dict[str, float]:
     """The end-of-run verdict gauntlet: every configured opponent (the registry
     ones plus ``net_opponents``) at ``cfg.final_games`` games each, with every

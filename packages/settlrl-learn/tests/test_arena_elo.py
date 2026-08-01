@@ -1,15 +1,17 @@
 """The arena's wiring into the Elo report: `run_arena`'s real-counts feed, the
 per-opponent schedules, the net-opponent seeds, and the name-based `arena`
-wrapper. The arena itself is stubbed out -- no games are played."""
+wrapper. The arena itself is stubbed out -- no games are played -- except in
+the compiled-callable cache section at the end (tiny real matches)."""
 
 from __future__ import annotations
 
 import sys
 from typing import Any, cast
 
-from settlrl_agents import POLICIES, BeliefSpec
+import jax
+from settlrl_agents import POLICIES, BeliefSpec, evaluate
 from settlrl_learn.training import MLPBackend
-from settlrl_learn.training.arena import ArenaResult, arena
+from settlrl_learn.training.arena import ArenaResult, NetOpponent, arena, arena_spec
 from settlrl_learn.training.config import ArenaConfig
 from settlrl_learn.training.elo import anchored_elo, anchored_elo_se
 from settlrl_learn.training.steps import run_arena
@@ -241,3 +243,73 @@ def test_run_arena_net_opponent_phase_rotates_rungs(monkeypatch: Any) -> None:
         5: [("az1", 60_000)],
         6: [("az0", 50_000)],
     }
+
+
+# --------------------------------------------------------------------------- #
+# The compiled-callable cache (tiny real matches)                              #
+# --------------------------------------------------------------------------- #
+
+# num_simulations=0 (the lookahead special case): the cache doesn't depend on
+# search depth, and the fused-scan trace is 3-4x cheaper than the real tree.
+_TINY = {
+    "n_games": 4, "num_simulations": 0, "max_num_considered_actions": 4,
+    "batch_size": 2, "seed": 3,
+}  # fmt: skip
+
+
+def _prebuilt_arena(backend: Any, net: Any, opp_spec: Any) -> ArenaResult:
+    """The pre-cache arena_spec implementation, verbatim: two plain evaluate()
+    calls over baked policy closures at _TINY's budget."""
+    net_spec = BeliefSpec(
+        lambda: backend.play_agent(
+            net, num_simulations=0, max_num_considered_actions=4
+        ),
+        frozenset((2,)),
+    )
+    r1 = evaluate([net_spec, opp_spec], n_episodes=2, batch_size=2, seed=3)
+    r2 = evaluate([opp_spec, net_spec], n_episodes=2, batch_size=2, seed=4)
+    return ArenaResult(float(r1.wins[0] + r2.wins[1]), int(r1.episodes + r2.episodes))
+
+
+def test_arena_spec_matches_the_plain_evaluate_composition() -> None:
+    # The correctness gate: the memoised compiled path must reproduce the
+    # evaluate() composition it replaced bit-for-bit -- same seats, same seeds,
+    # same games, the net's arrays traced instead of closure-baked.
+    backend = MLPBackend((16,))
+    net = backend.init(jax.random.key(0))
+    res = arena_spec(backend, net, opponent=POLICIES["random"], **_TINY)
+    assert res == _prebuilt_arena(backend, net, POLICIES["random"])
+
+
+def test_arena_spec_net_opponent_matches_the_prebuilt_spec_path() -> None:
+    # A NetOpponent (frozen net, arrays traced) plays exactly the games the
+    # equivalent pre-built baked spec plays.
+    backend = MLPBackend((16,))
+    net = backend.init(jax.random.key(0))
+    opp_backend = MLPBackend((16,))
+    opp_net = opp_backend.init(jax.random.key(2))
+    res = arena_spec(backend, net, opponent=NetOpponent(opp_backend, opp_net), **_TINY)
+    opp_agent = opp_backend.play_agent(
+        opp_net, num_simulations=0, max_num_considered_actions=4
+    )
+    opp_spec = BeliefSpec(lambda: opp_agent, frozenset((2,)))
+    assert res == _prebuilt_arena(backend, net, opp_spec)
+
+
+def test_run_arena_reuses_the_compiled_callables() -> None:
+    # Two run_arena rounds over one backend: the second builds no new callable
+    # (counted at the builder, not the clock) and returns equal metrics -- the
+    # cached-callable path must reproduce the cold-built one exactly.
+    arena_module = sys.modules["settlrl_learn.training.arena"]
+    backend = MLPBackend((16,))
+    net = backend.init(jax.random.key(1))
+    cfg = ArenaConfig(
+        games=4, sims=0, considered=4, batch=2,
+        opponents=["random"], anchor_elos={"random": -1115.0},
+    )  # fmt: skip
+    before = arena_module._EVAL_BUILDS
+    first = run_arena(backend, net, cfg, seed=0, round_index=1)
+    assert arena_module._EVAL_BUILDS - before == 2  # one per seat order
+    second = run_arena(backend, net, cfg, seed=0, round_index=2)
+    assert arena_module._EVAL_BUILDS - before == 2  # both reused, none rebuilt
+    assert first == second

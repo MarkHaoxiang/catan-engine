@@ -36,7 +36,7 @@ from settlrl_search import (
     make_search_weights_value,
 )
 
-from settlrl_learn.training.arena import OpponentSpec
+from settlrl_learn.training.arena import NetOpponent, OpponentSpec
 from settlrl_learn.training.backend import (
     Backend,
     RunState,
@@ -198,7 +198,8 @@ def learn(
     cfg: LearnConfig,
     *,
     teacher_value: ValueFunction | None = None,
-    net_opponents: Mapping[str, tuple[OpponentSpec, float, int, int]] | None = None,
+    net_opponents: Mapping[str, tuple[OpponentSpec | NetOpponent, float, int, int]]
+    | None = None,
     checkpoint_dir: str | Path | None = None,
     resume_from: str | Path | None = None,
     on_iter: Callable[[int, dict[str, float], Any], None] | None = None,

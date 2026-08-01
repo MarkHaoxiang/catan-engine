@@ -119,7 +119,14 @@ hook — render's conftest never checked engine types, so an int32 slipped by).
   lookahead-vs-greedy, ~1.3× steady-state on mcts matches (42 vs ~57 ms/step).
   Caveat: the scan retraces per `evaluate` call (the actor closure is fresh
   each time) — ~12 s per call for mcts-sized bodies, amortised over 200-game
-  matches, noticeable on ≤ 20-game probes.
+  matches, noticeable on ≤ 20-game probes. `compile_evaluate(make_agents, ...)`
+  is the memoisable escape: it returns a `run(params, ...)` bit-identical to
+  `evaluate(make_agents(params), ...)` on the fused path, but builds the seats
+  *inside* its jit from the traced `params` pytree (via the same
+  `_picker`/`_actor` and the engine's private `_rollout_core`, imported here so
+  the two paths cannot drift) — so new arrays of the same structure reuse the
+  compiled scan. Callers own the caching (settlrl-learn's arena memoises the
+  returned callables); stateful seats are rejected.
   A `StatefulSpec` seat switches `evaluate` to `_evaluate_stepwise`: the same
   seating/budget semantics through a per-step Python loop (stateful seats act
   lane by lane on host-fetched observations; pure seats keep their `_picker`,
