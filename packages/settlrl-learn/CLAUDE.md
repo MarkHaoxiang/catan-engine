@@ -198,6 +198,13 @@ uses them.
     shape/dtype gate, re-raised by `load_run_state` as a `ValueError` naming
     those knobs; `search.ordered`, invisible to any shape, rides as its own leaf
     checked by `from_padded`.
+    **Checkpoint format (rev 2026-08-01):** replay items store `mask` and
+    `train_policy` as **bool**; the losses cast to float32 at use — same
+    values in, and loss/grads verified byte-exact on CPU
+    (`test_bool_item_dtypes_are_loss_and_grad_bit_exact_with_float32`). A
+    pre-rev `runstate.eqx` fails at load with eqx's per-leaf dtype error
+    naming the leaf — by design, no migration; the pre-carry fields raise
+    eqx's error directly (only carry mismatches get the `ValueError` rewrap).
     Checkpoint size: the pad is fixed-shape, so a *persistent* run pays it in
     full at every write — **1.82 GiB** at B=256 / `max_game_len` 800 / GNN obs +
     662-wide policy, ~0.5 s to build and ~0.5 s to write (measured 2026-07-28, independent

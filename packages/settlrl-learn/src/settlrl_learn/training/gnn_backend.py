@@ -15,7 +15,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float
 from settlrl_agents.value import ValueFunction, heuristic_value
 from settlrl_engine.board.layout import N_TILES, N_VERTICES, BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar
@@ -120,9 +120,9 @@ class GNNItem(NamedTuple):
     glob: Array
     tiles: Array
     policy: Array
-    mask: Array
+    mask: Bool[Array, "*b flat"]
     value: Array
-    train_policy: Array
+    train_policy: Bool[Array, "*b"]
 
 
 def _masked_logp(logits: Array, mask: Array) -> Array:
@@ -147,6 +147,7 @@ def gnn_loss(
     train the policy); value trains on all. With ``train_policy`` all 1 this is
     the plain mean."""
     vs, logits = jax.vmap(model)(sample)
+    train_policy = jnp.asarray(train_policy, jnp.float32)  # stored bool, exact 0/1
     logp = _masked_logp(logits, mask)
     # guard 0 * -inf on illegal slots (target is 0 there anyway).
     ce = -jnp.sum(jnp.where(mask > 0, policy * logp, 0.0), axis=-1)  # per position
@@ -238,9 +239,9 @@ class GNNBackend:
             jnp.asarray(samples["glob"], jnp.float32),
             jnp.asarray(samples["tiles"], jnp.float32),
             jnp.asarray(samples["policy"], jnp.float32),
-            jnp.asarray(samples["mask"], jnp.float32),
+            jnp.asarray(samples["mask"], jnp.bool_),
             jnp.asarray(samples["value"], jnp.float32),
-            jnp.asarray(samples["train_policy"], jnp.float32),
+            jnp.asarray(samples["train_policy"], jnp.bool_),
         )
 
     def empty_item(self) -> GNNItem:
@@ -253,9 +254,9 @@ class GNNBackend:
             jnp.zeros((global_dim,), jnp.float32),
             jnp.zeros((N_TILES, tile_dim), jnp.float32),
             jnp.zeros((N_FLAT,), jnp.float32),
-            jnp.zeros((N_FLAT,), jnp.float32),
+            jnp.zeros((N_FLAT,), jnp.bool_),
             jnp.float32(0.0),
-            jnp.float32(1.0),
+            jnp.bool_(True),
         )
 
     def init_opt(

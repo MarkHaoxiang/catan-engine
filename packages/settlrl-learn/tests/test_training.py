@@ -494,9 +494,9 @@ def test_mlp_loss_masks_policy_by_train_policy() -> None:
     feats = jnp.asarray(rng.standard_normal((n, FEATURE_DIM)), jnp.float32)
     pol = jnp.asarray(rng.random((n, N_FLAT)), jnp.float32)
     val = jnp.asarray((rng.random(n) < 0.5).astype(np.float32))
-    full = MLPItem(feats, pol, val, jnp.ones(n, jnp.float32))
-    half = full._replace(train_policy=jnp.array([1, 1, 1, 0, 0, 0], jnp.float32))
-    first3 = MLPItem(feats[:3], pol[:3], val[:3], jnp.ones(3, jnp.float32))
+    full = MLPItem(feats, pol, val, jnp.ones(n, jnp.bool_))
+    half = full._replace(train_policy=jnp.array([1, 1, 1, 0, 0, 0], jnp.bool_))
+    first3 = MLPItem(feats[:3], pol[:3], val[:3], jnp.ones(3, jnp.bool_))
 
     _, a_full = mlp_loss(net, full, 1.0)
     _, a_half = mlp_loss(net, half, 1.0)
@@ -505,6 +505,71 @@ def test_mlp_loss_masks_policy_by_train_policy() -> None:
     assert abs(float(a_full["value_loss"]) - float(a_half["value_loss"])) < 1e-5
     # masked policy loss == the policy loss over the unmasked subset alone.
     assert abs(float(a_half["policy_loss"]) - float(a_first3["policy_loss"])) < 1e-4
+
+
+def test_bool_item_dtypes_are_loss_and_grad_bit_exact_with_float32() -> None:
+    # Checkpoint format rev: `to_item` stores mask/train_policy as bool (they are
+    # exact 0/1 flags) and the losses cast to float32 at use, so a bool item and
+    # its old float32 form must give byte-equal loss and grads -- checked on CPU
+    # for both backends over a real self-play batch (PCR mixes train_policy 0/1).
+    from jaxtyping import Array, Float
+    from settlrl_learn.nn.graph import Sample
+    from settlrl_learn.training import mlp_loss
+    from settlrl_learn.training.gnn_backend import gnn_loss
+
+    def widen(item: Any) -> Any:  # the pre-rev float32 item form
+        wide = {
+            k: jnp.asarray(getattr(item, k), jnp.float32)
+            for k in ("mask", "train_policy")
+            if hasattr(item, k)
+        }
+        return item._replace(**wide)
+
+    def assert_bit_exact(pair_a: Any, pair_b: Any) -> None:
+        (va, ga), (vb, gb) = pair_a, pair_b
+        assert np.asarray(va).tobytes() == np.asarray(vb).tobytes()
+        la, lb = jax.tree.leaves(ga), jax.tree.leaves(gb)
+        assert la
+        for x, y in zip(la, lb, strict=True):
+            assert np.asarray(x).tobytes() == np.asarray(y).tobytes()
+
+    with jax.default_device(jax.devices("cpu")[0]):
+        mlp = MLPBackend((16,))
+        samples, _, _ = self_play(
+            n_samples=8, batch_size=4, seed=0, **jitted(uniform_legal_dist, mlp)
+        )
+        # PCR's train_policy=0 rows must be represented, not just all-ones.
+        samples["train_policy"][::2] = 0.0
+        m_item = mlp.to_item(samples)
+        assert m_item.train_policy.dtype == jnp.bool_
+
+        def loss_m(params: Any, it: Any) -> Float[Array, ""]:  # noqa: F722
+            return mlp_loss(params, it, 1.0)[0]
+
+        m_net = mlp.init(jax.random.key(0))
+        assert_bit_exact(
+            jax.value_and_grad(loss_m)(m_net, m_item),
+            jax.value_and_grad(loss_m)(m_net, widen(m_item)),
+        )
+
+        gnn = GNNBackend(PRESETS["gn_global"]._replace(width=8, layers=1))
+        g_samples, _, _ = self_play(
+            n_samples=8, batch_size=4, seed=0, **jitted(uniform_legal_dist, gnn)
+        )
+        g_samples["train_policy"][::2] = 0.0
+        g_item = gnn.to_item(g_samples)
+        assert g_item.mask.dtype == jnp.bool_
+        assert g_item.train_policy.dtype == jnp.bool_
+
+        def loss_g(model: Any, it: Any) -> Float[Array, ""]:  # noqa: F722
+            return gnn_loss(
+                model, Sample(it.nodes, it.edges, it.glob, it.tiles, None),
+                it.policy, it.value, it.mask, it.train_policy,
+            )[0]  # fmt: skip
+
+        g_net = gnn.init(jax.random.key(0))
+        grad_g = eqx.filter_value_and_grad(loss_g)
+        assert_bit_exact(grad_g(g_net, g_item), grad_g(g_net, widen(g_item)))
 
 
 # --------------------------------------------------------------------------- #

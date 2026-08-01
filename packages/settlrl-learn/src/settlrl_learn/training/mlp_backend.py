@@ -13,7 +13,7 @@ from typing import NamedTuple, cast
 import jax
 import jax.numpy as jnp
 import optax
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float
 from settlrl_agents.value import ValueFunction
 from settlrl_engine.board.layout import BoardLayout
 from settlrl_engine.board.state import BoardState, IntScalar
@@ -36,7 +36,7 @@ class MLPItem(NamedTuple):
     features: Float[Array, "*b feat"]
     policy: Float[Array, "*b flat"]
     value: Float[Array, "*b"]
-    train_policy: Float[Array, "*b"]
+    train_policy: Bool[Array, "*b"]
 
 
 def mlp_loss(
@@ -49,7 +49,7 @@ def mlp_loss(
     vs, logits = jax.vmap(az_forward, in_axes=(None, 0))(params, item.features)
     logp = jax.nn.log_softmax(logits, axis=-1)
     ce = -jnp.sum(item.policy * logp, axis=-1)  # per position
-    tp = item.train_policy
+    tp = jnp.asarray(item.train_policy, jnp.float32)  # stored bool, exact 0/1
     policy_loss = jnp.sum(tp * ce) / jnp.maximum(jnp.sum(tp), 1.0)
     value_loss = jnp.mean(jax.nn.softplus(vs) - item.value * vs)
     total = policy_loss + value_weight * value_loss
@@ -105,7 +105,7 @@ class MLPBackend:
             jnp.asarray(samples["features"], jnp.float32),
             jnp.asarray(samples["policy"], jnp.float32),
             jnp.asarray(samples["value"], jnp.float32),
-            jnp.asarray(samples["train_policy"], jnp.float32),
+            jnp.asarray(samples["train_policy"], jnp.bool_),
         )
 
     def empty_item(self) -> MLPItem:
@@ -113,7 +113,7 @@ class MLPBackend:
             jnp.zeros((FEATURE_DIM,), jnp.float32),
             jnp.zeros((N_FLAT,), jnp.float32),
             jnp.float32(0.0),
-            jnp.float32(1.0),
+            jnp.bool_(True),
         )
 
     def init_opt(
