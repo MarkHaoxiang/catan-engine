@@ -127,7 +127,10 @@ uses them.
     Equivariant by construction (message passing over the static incidence; the
     symmetry tests already permute tiles). Off by default and **bit-identical**
     to before (the non-hetero init is preserved by only consuming the extra RNG
-    keys when hetero).
+    keys when hetero). `GraphNetConfig.degree_norm` (preset `gn_hetero_dnorm`)
+    divides each vertex↔hex incidence aggregate by its receiver's incidence
+    degree (HNHN, Dong et al. 2020) — parameter-free, so checkpoints are
+    layout-compatible across the flag, but not function-compatible.
     `feature_version>=2` (Task 2 of the featurization-v2 plan) changes two
     things, both gated on the same flag as the wider globals (one gate, since
     the four-arm study's `v2_base` needs all three together): the `"multi"`

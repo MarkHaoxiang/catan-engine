@@ -337,3 +337,14 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   an in-test naive gather-concat-transform reference over the same modules
   (float32 closeness on a real board, float64 identity ≤ 1e-12, parameter
   identity via the un-sliced weight).
+- 0003 guard_dnorm — fail (2026-08-01). HNHN-style degree normalization of
+  the hetero incidence aggregates (`gn_hetero_dnorm`: divide each
+  vertex<->hex sum by receiver incidence degree) vs `gn_hetero` on the
+  frozen az2 distill targets, 3 seeds each (v2 dataset generated at
+  `_DISTILL_SCHEMA=2`: 50,203 train / 10,227 val, ~3.6 GPU-min, now
+  cached). best_policy_kl challenger worst 0.09054 vs incumbent best
+  0.08097 (means 0.08590 vs 0.08191, challenger seed spread 4x); top-1 tie,
+  value MSE uniformly worse. `distill_verdict` = fail — no full-budget run.
+  Consistent with per-node LayerNorm already absorbing degree-dependent
+  scale. Runs 2026-08-01T214259Z / 214625Z; the lever stays as a
+  `GraphNetConfig` ablation knob (default off, off-path byte-identical).

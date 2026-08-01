@@ -160,7 +160,8 @@ adopted trunk. `hetero_v2` is the architecture-guard head-to-head: `gn_global`
 vs `gn_hetero` on the multi task at `feature_version=2`, three seed
 replicates.
 
-The `distill` task (`guard` variant) is the architecture-decision guard:
+The `distill` task (the `guard`/`guard_dnorm` variants, one challenger arch
+list each) is the architecture-decision guard:
 `distill.py` generates a frozen dataset from the az2 anchor's own self-play
 through the production stack (`selfplay_callables`/`run_selfplay`; search
 semantics from the anchor sidecar, the production opening-temperature

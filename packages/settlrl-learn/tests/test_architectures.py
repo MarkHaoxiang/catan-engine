@@ -147,6 +147,7 @@ def test_board_symmetry_leaves_structured_models_invariant() -> None:
         ("gn_hetero", 1, False),
         ("gn_global", 2, False),
         ("gn_hetero", 2, False),
+        ("gn_hetero_dnorm", 2, False),
         ("gn_global", 2, True),
         ("gn_hetero", 2, True),
     ],
@@ -325,7 +326,7 @@ v1, v2, v2 + the incidence block."""
 
 
 @pytest.mark.parametrize(("version", "incidence"), _FEATURE_ARMS)
-@pytest.mark.parametrize("preset", ["gn_global", "gn_hetero"])
+@pytest.mark.parametrize("preset", ["gn_global", "gn_hetero", "gn_hetero_dnorm"])
 def test_aznet_value_invariant_policy_equivariant_under_board_symmetry(
     preset: str, version: int, incidence: bool
 ) -> None:
@@ -347,7 +348,7 @@ def test_aznet_value_invariant_policy_equivariant_under_board_symmetry(
 
 
 @pytest.mark.parametrize(("version", "incidence"), _FEATURE_ARMS)
-@pytest.mark.parametrize("preset", ["gn_global", "gn_hetero"])
+@pytest.mark.parametrize("preset", ["gn_global", "gn_hetero", "gn_hetero_dnorm"])
 def test_aznet_value_and_policy_invariant_under_player_relabel(
     preset: str, version: int, incidence: bool
 ) -> None:

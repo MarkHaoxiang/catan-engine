@@ -37,7 +37,12 @@ Levers (``GraphNetConfig``):
 - ``incidence`` -- a ``feature_version>=2`` option: widen the node features with
   each vertex's incident-hex block (:func:`settlrl_learn.nn.graph.board_sample`'s
   own flag, which every sample feeding this net must match). Wider encoder input,
-  no architecture change -- the structure-free alternative to ``hetero``.
+  no architecture change -- the structure-free alternative to ``hetero``;
+- ``degree_norm`` -- a ``hetero`` option (HNHN, Dong et al. 2020): divide each
+  vertex<->hex incidence aggregate by its receiver's incidence degree (6 per
+  hex; 1-3 per vertex, coast vs interior), so the message scale is
+  degree-invariant instead of systematically smaller at the coast. Degree is a
+  symmetry invariant of the fixed board graph, so equivariance is preserved.
 
 The message and node-update MLPs' first Linears are weight-blocked (``_blocked_mlp``):
 computed once per *unique* input row (per vertex / tile / the one global row)
@@ -76,11 +81,18 @@ class GraphNetConfig(NamedTuple):
     hetero: bool = False  # add HEX/TILE nodes + vertex<->hex message passing
     feature_version: int = 1  # graph.FEATURE_VERSIONS: the board featurization
     incidence: bool = False  # v2 option: per-vertex incident-hex features
+    degree_norm: bool = False  # hetero: degree-normalize the incidence aggregates
 
 
 def _aggr(messages: Float[Array, "e w"]) -> Float[Array, "v w"]:
     """Sum a per-edge message into its receiver node (count-sensitive)."""
     return cast(Array, jraph.segment_sum(messages, RECEIVERS, num_segments=N_VERTICES))
+
+
+# Per-receiver incidence degrees for the hetero aggregates (static board
+# topology), as columns so they broadcast over the feature axis.
+_VERTEX_HEX_DEGREE = jnp.bincount(VT_V, length=N_VERTICES).astype(jnp.float32)[:, None]
+_HEX_VERTEX_DEGREE = jnp.bincount(VT_T, length=N_TILES).astype(jnp.float32)[:, None]
 
 
 class _GraphNorm(eqx.Module):
@@ -238,6 +250,8 @@ class _Layer(eqx.Module):
             assert h_t is not None and self.msg_tv is not None
             m_tv = _blocked_mlp(self.msg_tv, [(h_t, VT_T), (h, VT_V)])
             agg_tv = jraph.segment_sum(m_tv, VT_V, num_segments=N_VERTICES)
+            if self.cfg.degree_norm:
+                agg_tv = agg_tv / _VERTEX_HEX_DEGREE
             parts.append(agg_tv)
         # the per-vertex inputs share one matmul block; g's contribution is
         # one row, broadcast-added inside the blocked first Linear.
@@ -255,6 +269,8 @@ class _Layer(eqx.Module):
             assert h_t is not None and self.msg_vt is not None and self.tile is not None
             m_vt = _blocked_mlp(self.msg_vt, [(h, VT_V), (h_t, VT_T)])
             agg_vt = jraph.segment_sum(m_vt, VT_T, num_segments=N_TILES)
+            if self.cfg.degree_norm:
+                agg_vt = agg_vt / _HEX_VERTEX_DEGREE
             delta_t = jax.vmap(self.tile)(jnp.concatenate([h_t, agg_vt], -1))
             h_t_upd = h_t + delta_t if self.cfg.residual else delta_t
             h_t_new: Float[Array, "t w"] | None = _apply_norm(self.tile_norm, h_t_upd)
@@ -424,5 +440,13 @@ PRESETS: dict[str, GraphNetConfig] = {
     ),
     "gn_hetero": GraphNetConfig(
         conv="mpnn", norm="layer", global_node=True, readout="multi", hetero=True
+    ),
+    "gn_hetero_dnorm": GraphNetConfig(
+        conv="mpnn",
+        norm="layer",
+        global_node=True,
+        readout="multi",
+        hetero=True,
+        degree_norm=True,
     ),
 }

@@ -86,6 +86,19 @@ class NeuralBoardArchitecturesConfig(Config):
     wandb_mode: str = "online"  # online | offline | disabled
 
 
+# The guard variants' shared budget/shape (each picks its own arch list).
+_GUARD: dict[str, object] = {
+    "task": "distill",
+    "feature_version": 2,
+    "seeds": 3,
+    "collect_batch": 256,
+    "width": 96,
+    "layers": 4,
+    "depth": 2,
+    "epochs": 30,
+    "eval_every": 2,
+}
+
 VARIANTS: dict[str, dict[str, object]] = {
     "heuristic": {"task": "heuristic", "arch": "all"},
     "win": {"task": "win", "arch": "all"},
@@ -115,18 +128,9 @@ VARIANTS: dict[str, dict[str, object]] = {
     # Budget: 50k train samples / batch 1024 -> 48 steps/epoch, x30 epochs =
     # 1440 steps per arch-seed; 6 arch-seeds ~ 10-15 GPU-min + one-off
     # generation (~60k samples).
-    "guard": {
-        "task": "distill",
-        "arch": "gn_global,gn_hetero",
-        "feature_version": 2,
-        "seeds": 3,
-        "collect_batch": 256,
-        "width": 96,
-        "layers": 4,
-        "depth": 2,
-        "epochs": 30,
-        "eval_every": 2,
-    },
+    "guard": {**_GUARD, "arch": "gn_global,gn_hetero"},
+    # Same guard, HNHN degree-normalized incidence aggregates as the challenger.
+    "guard_dnorm": {**_GUARD, "arch": "gn_hetero,gn_hetero_dnorm"},
     "smoke": {
         "task": "heuristic",
         "arch": "all",
