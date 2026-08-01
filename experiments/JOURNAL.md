@@ -231,3 +231,21 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   (`gn_hetero`, feature_version=2, gauntlet elo 186.76 ± 10.88) added as an
   arena rung in `conf/arena/scale.yaml` — the ladder is now az0 −58 / az1
   +109.86 / az2 +186.76.
+- 0003 `guard` — **az2-distillation architecture guard calibrated on the known
+  pair (2026-08-01)**. New doctrine (Mark): architecture decisions route
+  through a supervised guard — train the production net (trunk under test)
+  with the production loss on a frozen az2-self-play dataset (improved policy
+  + root q + outcome; train/val from independently seeded generations) — not
+  through short RL runs; 300-iteration RL screens are retired (their absolute
+  +35 gate mislabeled controls that a full-budget run of the same class
+  passes, and short horizons conflate early trainability with asymptotic
+  quality). A guard pass earns a full 2500-iteration run judged by the
+  gauntlet gate. Calibration (`guard` variant, 3 seeds/arch, 50k train / 10k
+  val positions at sims=64, runs/0003_neural_board_architectures/
+  2026-08-01T094430Z): `gn_hetero` beats `gn_global` with zero seed overlap
+  on every primary metric — best val policy KL **0.0851 vs 0.1089** (spread
+  ~0.003 both; gap ≈ 6× spread), top-1 agree 91.8% vs 90.4%, value MSE(z)
+  0.103 vs 0.126 — reproducing the RL-loop ground truth (four-arm study +
+  az2 gate pass) in ~20 GPU-min vs ~8 GPU-h. Caveats: the teacher is itself
+  `gn_hetero` (teacher–student architecture match may inflate the hetero
+  edge), and this is one calibration pair, not a validation set.

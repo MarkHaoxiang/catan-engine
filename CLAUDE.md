@@ -56,9 +56,12 @@ scaffolding a new number (`uv run python experiments/new.py "<title>"` for
 genuinely new classes). Strength claims gate through `settlrl-agents bench` or
 an in-run match with the threshold asserted in code. Throughput claims gate
 through experiment 0004's `bench_throughput` preset (pinned config + frozen
-anchor) — quote `result.json` before/after at the same config. Record
-evidence there, not in package docs — CLAUDE.md files cite experiment
-numbers.
+anchor) — quote `result.json` before/after at the same config. Architecture
+decisions gate through experiment 0003's distillation guard (multi-seed
+supervised fit of the production net on frozen anchor self-play targets) —
+never through short RL training runs; a guard pass earns a full-budget run
+judged by the arena-Elo gate. Record evidence there, not in package docs —
+CLAUDE.md files cite experiment numbers.
 
 ## Checks
 

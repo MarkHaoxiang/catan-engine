@@ -1,6 +1,6 @@
 # 0003 — neural board architectures
 
-Status: open (framework live; first sweep concluded)
+Status: open (framework live; serves as the architecture-decision guard)
 
 ## Hypothesis
 
@@ -209,3 +209,29 @@ and attention effects are large and replicated.
 *Superseded 2026-07-30/31*: the 0004 four-arm study and the az2 gate pass
 showed `gn_hetero` beats `gn_global` in the full AZ loop; `gn_hetero` is the
 adopted trunk (see JOURNAL).
+
+## `guard` — az2-distillation architecture guard (2026-08-01)
+
+The framework's role now: the architecture-decision guard. The `distill` task
+trains the production net (trunk preset under test, production loss, the
+production value blend applied at training time) on a frozen dataset of az2
+self-play positions labelled with the search's improved policy, root q, and
+game outcome; train and validation come from independently seeded generation
+runs, so there is no within-game leakage.
+
+Calibration on the one pair with known RL-loop truth
+(`runs/0003_neural_board_architectures/2026-08-01T094430Z`, 3 seeds/arch,
+50k train / 10k val positions, sims=64):
+
+| metric (val, best) | gn_global | gn_hetero |
+|---|---|---|
+| policy KL (↓) | 0.1089 (spread 0.003) | **0.0851** (spread 0.003) |
+| top-1 agree | 0.904 | **0.918** |
+| value MSE vs z | 0.126 | **0.103** |
+
+Zero seed overlap on all three; the KL gap is ~6× either arm's spread. This
+reproduces the four-arm study's ordering at ~20 GPU-minutes. Caveats: the
+teacher is itself `gn_hetero`, so a teacher–student architecture match may
+inflate the hetero edge; one calibrated pair is not a validation set — the
+guard's verdict on a genuinely new trunk should be re-checked against the
+full run that a pass earns anyway.
