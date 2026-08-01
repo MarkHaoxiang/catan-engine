@@ -17,6 +17,14 @@ list (the GraphNet lever ablation). ``feature_version``/``incidence`` select the
 board feature set (data and models alike); ``seeds`` trains per-arch replicates
 (model-init/shuffle seed only) and the verdict reads the per-seed mean.
 
+``distill`` is the architecture-decision guard: it trains the *production*
+AlphaZero net (``GNNBackend`` over a GraphNet preset, the production loss and
+optimizer) supervised on a frozen dataset of the ``distill_anchor``'s own
+self-play (``distill.generate``; targets = the search's improved policy and
+the production value blend) and reports policy/value fit -- train and val are
+two independently generated datasets, so there is zero within-game leakage by
+construction. Its ``arch`` list must name GraphNet presets.
+
     uv run python experiments/0003_neural_board_architectures/run.py [variant] [k=v ...]
 """
 
@@ -24,6 +32,8 @@ import sys
 from pathlib import Path
 
 from data import generate, split
+from distill import generate as generate_distill
+from distill_train import distill_train
 from settlrl_learn.experiment import Config, Run, start_run
 from settlrl_learn.nn.architectures import make_model
 from train import TASK_FIELDS, select_metric, train
@@ -40,8 +50,8 @@ ABLATION = (
 class NeuralBoardArchitecturesConfig(Config):
     seed: int = 0
     seeds: int = 1  # model-init/shuffle replicates per arch (data stays on `seed`)
-    task: str = "heuristic"  # heuristic | win
-    arch: str = "all"  # all | one of ARCHS
+    task: str = "heuristic"  # heuristic | win | road | turns | multi | distill
+    arch: str = "all"  # all | one of ARCHS (distill: GraphNet presets only)
     # data (greedy self-play, cached by these knobs under runs/_cache)
     agent: str = "greedy"
     players: int = 2
@@ -52,6 +62,12 @@ class NeuralBoardArchitecturesConfig(Config):
     # featurization (settlrl_learn.nn.graph: feature set + incidence option)
     feature_version: int = 1
     incidence: bool = False
+    # distill task: frozen anchor-self-play datasets (train and val generated
+    # independently -- seed and seed+1000 -- for a leak-free-by-construction split)
+    distill_anchor: str = "az2_hetero96x4"
+    distill_sims: int = 64
+    distill_samples: int = 50_000
+    distill_val_samples: int = 10_000
     # model
     width: int = 64
     depth: int = 2
@@ -87,6 +103,26 @@ VARIANTS: dict[str, dict[str, object]] = {
         "feature_version": 2,
         "seeds": 3,
     },
+    # The architecture-decision guard: the production net (adopted trunk vs
+    # challenger at production size) distilled from frozen az2 self-play, at
+    # the production optimizer settings (lr/batch from 0004's optim/scale).
+    # Budget: 50k train samples / batch 1024 -> 48 steps/epoch, x30 epochs =
+    # 1440 steps per arch-seed; 6 arch-seeds ~ 10-15 GPU-min + one-off
+    # generation (~60k samples).
+    "guard": {
+        "task": "distill",
+        "arch": "gn_global,gn_hetero",
+        "feature_version": 2,
+        "seeds": 3,
+        "collect_batch": 256,
+        "width": 96,
+        "layers": 4,
+        "depth": 2,
+        "epochs": 30,
+        "batch_size": 1024,
+        "lr": 5e-4,
+        "eval_every": 2,
+    },
     "smoke": {
         "task": "heuristic",
         "arch": "all",
@@ -106,8 +142,94 @@ VARIANTS: dict[str, dict[str, object]] = {
 }
 
 
+def aggregate_seeds(
+    per_seed: list[dict[str, float]], seeds: int
+) -> tuple[dict[str, float | list[float]], dict[str, float]]:
+    """Per-metric per-seed value(s) plus ``<metric>_mean`` / ``<metric>_spread``
+    (max - min): ``results.json``'s per-arch entry and the mean a verdict reads."""
+    entry: dict[str, float | list[float]] = {}
+    mean: dict[str, float] = {}
+    for metric in per_seed[0]:
+        values = [m[metric] for m in per_seed]
+        mean[metric] = sum(values) / len(values)
+        entry[metric] = values[0] if seeds == 1 else values
+        entry[f"{metric}_mean"] = mean[metric]
+        entry[f"{metric}_spread"] = max(values) - min(values)
+    return entry, mean
+
+
+def run_distill(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
+    import jax
+    from settlrl_learn.nn.graphnet import PRESETS
+    from settlrl_learn.training import GNNBackend
+
+    archs = tuple(cfg.arch.split(","))
+    unknown = [a for a in archs if a not in PRESETS]
+    if unknown:
+        raise ValueError(
+            f"distill trains the production GraphNet net only; {unknown} are not "
+            f"presets (choose from {sorted(PRESETS)})"
+        )
+    # Two independently generated datasets (different generation seeds): train
+    # on one, evaluate on the other -- zero within-game leakage by construction.
+    train_data = generate_distill(
+        cfg.distill_anchor, cfg.distill_sims, cfg.collect_batch,
+        cfg.distill_samples, cfg.seed,
+    )  # fmt: skip
+    val_data = generate_distill(
+        cfg.distill_anchor, cfg.distill_sims, cfg.collect_batch,
+        cfg.distill_val_samples, cfg.seed + 1000,
+    )  # fmt: skip
+    for name, d in (("train", train_data), ("val", val_data)):
+        if (
+            int(d["feature_version"]) != cfg.feature_version
+            or bool(d["incidence"]) != cfg.incidence
+        ):
+            raise ValueError(
+                f"{name} dataset was generated at feature_version="
+                f"{int(d['feature_version'])}/incidence={bool(d['incidence'])}, "
+                f"but the run wants {cfg.feature_version}/{cfg.incidence}"
+            )
+    run.log(
+        n_train=int(train_data["value"].shape[0]),
+        n_val=int(val_data["value"].shape[0]),
+        train_win_rate=float(train_data["value"].mean()),
+    )
+
+    results: dict[str, dict[str, float | list[float]]] = {}
+    means: dict[str, dict[str, float]] = {}
+    for arch in archs:
+        per_seed: list[dict[str, float]] = []
+        for i in range(cfg.seeds):
+            netcfg = PRESETS[arch]._replace(
+                width=cfg.width, layers=cfg.layers, head_depth=cfg.depth,
+                feature_version=cfg.feature_version, incidence=cfg.incidence,
+            )  # fmt: skip
+            backend = GNNBackend(netcfg)
+            net = backend.init(jax.random.key(cfg.seed + i))
+            sub = Run(run.dir / (arch if cfg.seeds == 1 else f"{arch}-s{i}"))
+            sub.dir.mkdir(exist_ok=True)
+            metrics = distill_train(
+                sub, {**cfg.dump(), "arch": arch, "seed": cfg.seed + i},
+                backend, net, train_data, val_data,
+            )  # fmt: skip
+            per_seed.append(metrics)
+            run.log(arch=arch, **metrics)
+        results[arch], means[arch] = aggregate_seeds(per_seed, cfg.seeds)
+    run.save_json("results.json", results)
+    # No go/no-go yet: the guard's thresholds land with its retro-validation.
+    run.finish(
+        "recorded", select="best_policy_kl",
+        **{a: means[a].get("best_policy_kl") for a in archs},
+    )  # fmt: skip
+
+
 def run_experiment(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
     import jax
+
+    if cfg.task == "distill":
+        run_distill(run, cfg)
+        return
 
     data_cfg = {
         "agent": cfg.agent, "players": cfg.players, "n_samples": cfg.n_samples,
@@ -144,15 +266,7 @@ def run_experiment(run: Run, cfg: NeuralBoardArchitecturesConfig) -> None:
             )  # fmt: skip
             per_seed.append(metrics)
             run.log(arch=arch, **metrics)
-        entry: dict[str, float | list[float]] = {}
-        means[arch] = {}
-        for metric in per_seed[0]:
-            values = [m[metric] for m in per_seed]
-            means[arch][metric] = sum(values) / len(values)
-            entry[metric] = values[0] if cfg.seeds == 1 else values
-            entry[f"{metric}_mean"] = means[arch][metric]
-            entry[f"{metric}_spread"] = max(values) - min(values)
-        results[arch] = entry
+        results[arch], means[arch] = aggregate_seeds(per_seed, cfg.seeds)
     run.save_json("results.json", results)
 
     # Verdict (on the per-seed mean): a raw-board representation is competitive

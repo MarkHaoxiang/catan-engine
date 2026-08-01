@@ -159,3 +159,21 @@ supervised ablation; the 0004 four-arm study (2026-07-30) then showed
 adopted trunk. `hetero_v2` is the architecture-guard head-to-head: `gn_global`
 vs `gn_hetero` on the multi task at `feature_version=2`, three seed
 replicates.
+
+The `distill` task (`guard` variant) is the architecture-decision guard:
+`distill.py` generates a frozen dataset from the az2 anchor's own self-play
+through the production stack (`selfplay_callables`/`run_selfplay`; search
+semantics from the anchor sidecar, PCR off so every position is a
+full-search target) holding the GNN observation, the search's improved
+policy, `mask`, the root search value `q` and the raw outcome `z` — kept
+separate in the dump, cached under `runs/_cache/0003` keyed by
+`(anchor, sims, batch, n_samples, seed)` + `_DISTILL_SCHEMA`.
+`distill_train.py` trains the *production* net (`GNNBackend` over a GraphNet
+preset — the `arch` list must name presets) with the backend's own train step
+and optimizer, blending the value target at training time via
+`steps.prepare_targets` with alpha read from 0004's `value_blend/scale.yaml`;
+val metrics are masked policy KL (the best-checkpoint criterion), top-1
+agreement, and P(win) MSE vs the blended target and vs raw `z`. Train and
+val are two independently generated datasets (generation seeds `seed` and
+`seed+1000`), so the split is leak-free by construction. Verdict is
+`"recorded"` — the go/no-go thresholds land with the retro-validation.

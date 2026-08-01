@@ -64,6 +64,24 @@ def test_0003_variants_resolve() -> None:
         run.NeuralBoardArchitecturesConfig.resolve(variant)
 
 
+def test_0003_distill_config_records_q() -> None:
+    # Composition only (no self-play): the distill generation LearnConfig must
+    # make the loop record the root search value `q` -- checked through the
+    # loop's own predicate (`value_blend.max > 0`, `loop.run_selfplay`) and the
+    # recorded-keys spec self-play builds from it -- with PCR off, so every
+    # position is a full-search policy target.
+    from settlrl_engine.env import N_FLAT
+    from settlrl_learn.training.carry import recorded_spec
+
+    distill = load_run("0003_neural_board_architectures", module="distill")
+    cfg = distill.learn_config("az2_hetero96x4", sims=8, batch=8, n_samples=64)
+    assert cfg.selfplay.pcr_full_prob == 1.0
+    assert cfg.selfplay.samples == 64 and cfg.selfplay.batch == 8
+    assert cfg.search.num_simulations == 8
+    spec = recorded_spec({}, n_flat=N_FLAT, record_value=cfg.value_blend.max > 0)
+    assert "q" in spec and "train_policy" in spec
+
+
 # The one genuinely tiny end-to-end 0004 run: the mlp path (not gnn -- gnn
 # training is covered end-to-end by settlrl-learn's
 # test_learn_resume_bit_exact_gnn, and chance/ordered search by
