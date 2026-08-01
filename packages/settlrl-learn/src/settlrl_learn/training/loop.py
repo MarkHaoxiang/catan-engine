@@ -10,7 +10,8 @@ this loop is shared by the flat-MLP and board-GNN paths.
 (the grouped, validated knob surface) and orchestrates the per-iteration steps
 (:mod:`settlrl_learn.training.steps`). Per-iteration RNG derives from
 ``cfg.seed`` and the iteration index, so ``resume_from`` (a prior ``runstate.eqx``)
-continues a run bit-exactly.
+continues a run bit-exactly when no lane exceeded ``selfplay.checkpoint_pad``
+at save (always, at the default ``None``).
 
 A training-side module: not imported by the package root.
 """
@@ -219,8 +220,9 @@ def learn(
 
     The full :class:`RunState` is checkpointed to ``checkpoint_dir/runstate.eqx``
     every ``cfg.checkpoint_every`` iterations; ``resume_from`` continues it
-    bit-exactly. ``on_iter(i, metrics, net)`` runs after each iteration.
-    ``progress`` shows a tqdm bar over the iterations."""
+    bit-exactly when no lane exceeded ``selfplay.checkpoint_pad`` at save
+    (always, at the default ``None``). ``on_iter(i, metrics, net)`` runs after
+    each iteration. ``progress`` shows a tqdm bar over the iterations."""
     s = cfg.search
     optimizer = make_optimizer(cfg.optim)
     buffer = fbx.make_item_buffer(
@@ -419,7 +421,14 @@ def learn(
 
         if ckpt is not None and (i + 1) % cfg.checkpoint_every == 0:
             if carry is not None:
-                pool = to_padded(carry, cfg.selfplay.max_game_len)
+                pool, trunc = to_padded(
+                    carry, cfg.selfplay.max_game_len,
+                    checkpoint_pad=cfg.selfplay.checkpoint_pad,
+                )  # fmt: skip
+                # Surface the pad bound's cost: any truncated lane makes this
+                # checkpoint's resume diverge from the uninterrupted run.
+                metrics["checkpoint_truncated_lanes"] = float(trunc.lanes)
+                metrics["checkpoint_truncated_rows"] = float(trunc.rows)
             else:
                 assert zero_carry is not None  # only persistent runs drop it
                 pool = zero_carry

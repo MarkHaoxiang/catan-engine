@@ -21,6 +21,7 @@ checkpoint_every: 50
 selfplay:
   batch: 512
   persistent: true
+  checkpoint_pad: 512  # bounds the carry pad; clears the observed max pending (398 at B=512; settlrl-learn/CLAUDE.md)
   temperature_moves: 30
   pcr_full_prob: 0.25
   pcr_fast_sims: 16

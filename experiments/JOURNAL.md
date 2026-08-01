@@ -271,3 +271,13 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   the bits), and the measured GPU search-step win was noise-level
   (326.3 → 324.0 ms B=64, 930.2 → 928.1 ms B=256). Bit-exactness bar +
   neutral win → not landed (change recoverable from the session stash).
+- learn checkpoint slimming, format rev (2026-08-01). Replay items store
+  `mask`/`train_policy` as bool (losses cast at use; loss/grads byte-exact on
+  CPU, pinned test) and `selfplay.checkpoint_pad` bounds the persistent-carry
+  pad (scale presets set 512, clearing the measured pending tail: median 88 /
+  p99 272 / max 398 rows at the v2_hetero final ckpt, B=512; over-bound lanes
+  keep their tail and the loop logs `checkpoint_truncated_lanes`/`_rows`).
+  Save bench at the production shape (B=512, 200k buffer, CPU, NVMe):
+  **6.24 GB / 1.95 s → 4.43 GB / 1.18 s** per write (~0.40 GB from the bool
+  dtypes, ~1.41 GB from the 800→512 pad). Pre-rev checkpoints fail to load
+  with eqx's per-leaf dtype error — no migration.

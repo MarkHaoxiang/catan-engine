@@ -194,10 +194,10 @@ uses them.
     since shapes alone don't see everything: `selfplay.persistent` **off** skips
     the carry section unread (no cost, no check); a mismatched section that *is*
     read — `persistent` turned **on** over a pool-less checkpoint, or a changed
-    `selfplay.batch` / `max_game_len` / `value_blend` — trips eqx's per-leaf
-    shape/dtype gate, re-raised by `load_run_state` as a `ValueError` naming
-    those knobs; `search.ordered`, invisible to any shape, rides as its own leaf
-    checked by `from_padded`.
+    `selfplay.batch` / `max_game_len` / `checkpoint_pad` / `value_blend` —
+    trips eqx's per-leaf shape/dtype gate, re-raised by `load_run_state` as a
+    `ValueError` naming those knobs; `search.ordered`, invisible to any shape,
+    rides as its own leaf checked by `from_padded`.
     **Checkpoint format (rev 2026-08-01):** replay items store `mask` and
     `train_policy` as **bool**; the losses cast to float32 at use — same
     values in, and loss/grads verified byte-exact on CPU
@@ -205,19 +205,33 @@ uses them.
     pre-rev `runstate.eqx` fails at load with eqx's per-leaf dtype error
     naming the leaf — by design, no migration; the pre-carry fields raise
     eqx's error directly (only carry mismatches get the `ValueError` rewrap).
-    Checkpoint size: the pad is fixed-shape, so a *persistent* run pays it in
-    full at every write — **1.82 GiB** at B=256 / `max_game_len` 800 / GNN obs +
-    662-wide policy, ~0.5 s to build and ~0.5 s to write (measured 2026-07-28, independent
-    of pool fullness). Transient: the loop frees each `to_padded` result after
-    writing and drops the zero template once persistent, so steady-state host
-    RAM is just the live pool (~0.6 GiB at those shapes); non-persistent pads to
-    zero rows, 266 KiB. The adopted `scale2` preset (throughput wave,
-    2026-07-28) runs B=512 — pad linear in `selfplay.batch`, **~3.6 GiB** — at a
-    measured ~1 s write: acceptable. If that
-    cost ever bites, the lever is a pad bound below `max_game_len`, not the
-    fixed shape. `save_run_state` writes to a sibling `.tmp` and `os.replace`s
-    it into place — atomic, so a kill mid-write (the validated long-run
-    procedure) leaves the previous checkpoint intact.
+    Checkpoint size: the pad is fixed-shape, so a *persistent* run pays it at
+    every write, independent of pool fullness. `selfplay.checkpoint_pad`
+    bounds the pad below `max_game_len`: at save time a lane whose pending
+    exceeds the bound keeps only its most recent rows (the game's tail), so a
+    resumed run **diverges from the uninterrupted one on any truncated lane**
+    — `to_padded` counts what the bound dropped and the loop logs it as
+    `checkpoint_truncated_lanes`/`_rows` on checkpoint iterations. Only the
+    default `None` (full pad) is lossless by construction. The scale-class
+    presets (scale2, scale2_long, v2_*) set 512, clearing the measured
+    production pending distribution (v2_hetero final checkpoint, B=512:
+    median 88 / p90 189 / p99 272 / max 398 rows) with headroom — at 256 the
+    observed 7/512 over-bound lanes would put P(no lane truncated) around
+    0.1% per save, i.e. practically every resume diverging. That distribution
+    is audited on a final (trained-net) checkpoint; early-training games run
+    longer, so an early-run kill-and-resume may truncate more lanes — each
+    truncated lane still keeps its most recent `checkpoint_pad` rows, so the
+    cost stays bounded: divergence plus the dropped samples, never
+    corruption. A persistent
+    B=512 / 200k-item-buffer checkpoint writes **~4.4 GB in ~1.2 s**
+    (measured 2026-08-01, CPU, NVMe; before/after split in the exp 0004
+    JOURNAL line).
+    Transient: the loop frees each `to_padded` result after writing and drops
+    the zero template once persistent, so steady-state host RAM is just the
+    live pool; non-persistent pads to zero rows, 266 KiB. `save_run_state`
+    writes to a sibling `.tmp` and `os.replace`s it into place — atomic, so a
+    kill mid-write (the validated long-run procedure) leaves the previous
+    checkpoint intact.
   - `training/selfplay.py::self_play` — batched n-player self-play, the search
     (net's or a fixed teacher's) guiding the re-determinizing moves and improved
     policy. The backend's `observe` records the *true* board (net learns the
@@ -272,8 +286,10 @@ uses them.
     "derived" cannot drift) and `make_env` — self-play's *only* env construction
     site, since a carried pool is restorable only into an identically-built env.
     The padded form is fixed-shape, as an eqx deserialisation template must be:
-    every recorded key pads to `(batch, max_game_len, …)` in host numpy with a
-    per-lane `pending_len`; the env — a held *object*, not a pytree —
+    every recorded key pads to `(batch, pad, …)` in host numpy with a per-lane
+    `pending_len`, where `pad` is `max_game_len` bounded by
+    `selfplay.checkpoint_pad` (truncation semantics under `backend.py` above);
+    the env — a held *object*, not a pytree —
     contributes `PaddedEnv`, its complete array state with PRNG keys as raw
     uint32 (eqx cannot serialise typed key arrays). `from_padded` rebuilds an
     equivalent env by re-constructing one and overwriting that state (the

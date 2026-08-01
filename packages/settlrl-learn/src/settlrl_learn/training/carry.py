@@ -5,9 +5,9 @@ hands back under ``persistent`` and takes back to resume the games in flight; it
 holds the env *object*, so it cannot be serialised as a pytree.
 :class:`PaddedCarry` is the eqx-serialisable projection of it that rides in a
 :class:`~settlrl_learn.training.backend.RunState` -- host-numpy pads of fixed
-shape, PRNG keys as raw uint32 -- with ``to_padded``/``from_padded`` the lossless
-pair between them and ``empty_padded``/``carry_template`` the zero template a
-deserialisation needs.
+shape, PRNG keys as raw uint32 -- with ``to_padded``/``from_padded`` the round
+trip between them (lossless while no lane exceeds the checkpoint pad) and
+``empty_padded``/``carry_template`` the zero template a deserialisation needs.
 
 A training-side module: not imported by the package root.
 """
@@ -112,7 +112,7 @@ class PaddedCarry(NamedTuple):
     eqx-serialised :class:`~settlrl_learn.training.backend.RunState`.
 
     Each recorded key of ``pending`` is host numpy padded to
-    ``(batch, max_game_len, *trailing)``, live rows per lane in ``pending_len``;
+    ``(batch, pad, *trailing)``, live rows per lane in ``pending_len``;
     ``seat`` joins the recorded keys. ``present`` is 0 for the zero template a
     run with no live pool checkpoints, so "no pool was stored" and "an empty
     pool" stay distinguishable.
@@ -204,16 +204,22 @@ def _restore_env(padded: PaddedEnv, *, track_ordering: bool) -> BatchedSettlrlEn
     return env
 
 
+def _pad_len(max_game_len: int, checkpoint_pad: int | None) -> int:
+    """The per-lane checkpoint pad: ``max_game_len`` bounded by
+    ``checkpoint_pad``."""
+    return max_game_len if checkpoint_pad is None else min(checkpoint_pad, max_game_len)
+
+
 def _empty_pending(
     batch_size: int,
-    max_game_len: int,
+    pad_len: int,
     spec: dict[str, tuple[tuple[int, ...], np.dtype[Any]]],
 ) -> tuple[dict[str, np.ndarray], np.ndarray]:
     pending = {
-        k: np.zeros((batch_size, max_game_len, *shape), dt)
+        k: np.zeros((batch_size, pad_len, *shape), dt)
         for k, (shape, dt) in spec.items()
     }
-    pending["seat"] = np.zeros((batch_size, max_game_len), np.int32)
+    pending["seat"] = np.zeros((batch_size, pad_len), np.int32)
     return pending, np.zeros((batch_size,), np.int32)
 
 
@@ -222,7 +228,7 @@ def empty_padded(
     batch_size: int,
     n_players: int,
     track_ordering: bool,
-    max_game_len: int,
+    pad_len: int,
     spec: dict[str, tuple[tuple[int, ...], np.dtype[Any]]],
 ) -> PaddedCarry:
     """The zero :class:`PaddedCarry` ``spec`` implies (``present`` = 0): the eqx
@@ -231,7 +237,7 @@ def empty_padded(
         batch_size=batch_size, seed=0, n_players=n_players,
         track_ordering=track_ordering,
     )  # fmt: skip
-    pending, pending_len = _empty_pending(batch_size, max_game_len, spec)
+    pending, pending_len = _empty_pending(batch_size, pad_len, spec)
     return PaddedCarry(
         env=_env_arrays(env),
         pending=pending,
@@ -243,15 +249,39 @@ def empty_padded(
     )
 
 
-def to_padded(carry: SelfPlayCarry, max_game_len: int) -> PaddedCarry:
-    """``carry`` in its fixed-shape checkpointable form. ``max_game_len`` must be
-    the one self-play trims at, so no lane can overflow the pad."""
+class PadTruncation(NamedTuple):
+    """What the ``checkpoint_pad`` bound dropped at save time (both zero at the
+    default full pad)."""
+
+    lanes: int
+    rows: int
+
+
+def to_padded(
+    carry: SelfPlayCarry, max_game_len: int, *, checkpoint_pad: int | None = None
+) -> tuple[PaddedCarry, PadTruncation]:
+    """``carry`` in its fixed-shape checkpointable form, plus what the pad bound
+    dropped. ``max_game_len`` must be the one self-play trims at, so no lane can
+    overflow the full pad.
+
+    ``checkpoint_pad`` bounds the pad below ``max_game_len``: a lane whose
+    pending exceeds it keeps only its most recent rows (the game's tail), so the
+    earlier positions are lost to a resume -- the resumed run then diverges from
+    the uninterrupted one on that lane."""
     assert carry.spec, "an unplayed carry has no recorded-field spec to pad"
+    pad_len = _pad_len(max_game_len, checkpoint_pad)
     obs_keys = [k for k in carry.spec if k not in DERIVED_KEYS]
-    pend, lens = _empty_pending(len(carry.pending), max_game_len, carry.spec)
+    pend, lens = _empty_pending(len(carry.pending), pad_len, carry.spec)
+    truncated_lanes = truncated_rows = 0
     for lane, rows in enumerate(carry.pending):
+        assert len(rows) <= max_game_len, (
+            f"lane {lane} holds {len(rows)} rows past the self-play trim"
+        )
+        if len(rows) > pad_len:
+            truncated_lanes += 1
+            truncated_rows += len(rows) - pad_len
+            rows = rows[-pad_len:]
         n = len(rows)
-        assert n <= max_game_len, f"lane {lane} holds {n} rows past the pad"
         lens[lane] = n
         if n == 0:
             continue
@@ -263,7 +293,7 @@ def to_padded(carry: SelfPlayCarry, max_game_len: int) -> PaddedCarry:
         if "q" in pend:
             pend["q"][lane, :n] = [r[4] for r in rows]
         pend["train_policy"][lane, :n] = [r[5] for r in rows]
-    return PaddedCarry(
+    padded = PaddedCarry(
         env=_env_arrays(carry.env),
         pending=pend,
         pending_len=lens,
@@ -272,6 +302,7 @@ def to_padded(carry: SelfPlayCarry, max_game_len: int) -> PaddedCarry:
         track_ordering=np.asarray(int(carry.env.track_ordering), np.int32),
         present=np.ones((), np.int32),
     )
+    return padded, PadTruncation(truncated_lanes, truncated_rows)
 
 
 def from_padded(padded: PaddedCarry, *, track_ordering: bool) -> SelfPlayCarry:
@@ -321,16 +352,20 @@ _SELFPLAY_N_PLAYERS = 2
 def carry_template(backend: Backend, cfg: LearnConfig) -> PaddedCarry:
     """The zero :class:`PaddedCarry` a run of ``cfg`` checkpoints: the eqx
     template resume deserialises into, and what stands in without a live pool.
-    A non-persistent run pads to zero rows."""
+    A non-persistent run pads to zero rows; ``cfg.selfplay.checkpoint_pad``
+    bounds the pad exactly as :func:`to_padded` does, so the template's shapes
+    match what the loop writes."""
     layout, state = make_board(batch_size=1, seed=0, n_players=_SELFPLAY_N_PLAYERS)
     one = jax.tree.map(lambda x: x[0], (layout, state))
     obs = jax.eval_shape(backend.observe, one[0], one[1], jnp.int32(0))
     obs_spec = {k: (tuple(v.shape), np.dtype(v.dtype)) for k, v in obs.items()}
     spec = recorded_spec(obs_spec, n_flat=N_FLAT, record_value=cfg.value_blend.max > 0)
+    selfplay_config = cfg.selfplay
+    pad = _pad_len(selfplay_config.max_game_len, selfplay_config.checkpoint_pad)
     return empty_padded(
-        batch_size=cfg.selfplay.batch,
+        batch_size=selfplay_config.batch,
         n_players=_SELFPLAY_N_PLAYERS,
         track_ordering=cfg.search.ordered,
-        max_game_len=cfg.selfplay.max_game_len if cfg.selfplay.persistent else 0,
+        pad_len=pad if selfplay_config.persistent else 0,
         spec=spec,
     )

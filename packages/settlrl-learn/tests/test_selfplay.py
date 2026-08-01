@@ -144,7 +144,7 @@ def test_temperature_moves_anneal_then_argmax_is_key_independent() -> None:
         temperature_moves=1, persistent=True, max_steps=1, **j,
     )  # fmt: skip
     assert carry is not None and len(carry.pending[0]) == 1  # move 0 recorded
-    padded = to_padded(carry, max_game_len=800)
+    padded, _ = to_padded(carry, max_game_len=800)
     carry_a = from_padded(padded, track_ordering=False)._replace(key=jax.random.key(11))
     carry_b = from_padded(padded, track_ordering=False)._replace(key=jax.random.key(22))
     kwargs = {

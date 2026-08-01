@@ -10,7 +10,8 @@ one loop.
 :class:`RunState` is the whole mutable run state, eqx-serialised for **bit-exact
 resume** -- eqx's leaf serialiser fits both an equinox module and a plain-JAX
 pytree, and the per-iteration RNG is a pure function of the seed and iteration
-index, so a resumed run continues bit-identically.
+index, so a resumed run continues bit-identically when no lane exceeded
+``selfplay.checkpoint_pad`` at save (always, at the default ``None``).
 
 A training-side module: not imported by the package root.
 """
@@ -95,7 +96,9 @@ class Backend(Protocol):
 
 
 class RunState(NamedTuple):
-    """One run's complete mutable state, eqx-serialised for bit-exact resume.
+    """One run's complete mutable state, eqx-serialised for bit-exact resume
+    (exact when no lane exceeded ``selfplay.checkpoint_pad`` at save; always,
+    at the default ``None``).
 
     ``selfplay_carry`` is last so it forms the file's trailing section, which is
     what lets :func:`load_run_state` read a checkpoint written before the field
@@ -149,7 +152,8 @@ def load_run_state(path: str | Path, template: RunState) -> RunState:
                 raise ValueError(
                     "the checkpointed self-play carry does not fit this run: it "
                     "was written under a different selfplay.persistent, "
-                    "selfplay.batch, selfplay.max_game_len or value_blend. "
+                    "selfplay.batch, selfplay.max_game_len, "
+                    "selfplay.checkpoint_pad or value_blend. "
                     "Resume with the settings that wrote it, or start a fresh "
                     f"run. ({e})"
                 ) from e

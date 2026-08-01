@@ -11,7 +11,7 @@ A training-side module: not imported by the package root.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from settlrl_search.ismcts import SearchConfig
 
 
@@ -50,12 +50,31 @@ class SelfPlayConfig(_Group):
     """Keep the self-play env, its games in flight and their RNG alive across
     calls (a ``SelfPlayCarry``) instead of rebuilding per call, so games finish
     across iteration boundaries instead of being discarded at them."""
+    checkpoint_pad: int | None = Field(default=None, ge=1)
+    """Bound the persistent carry's per-lane checkpoint pad below
+    ``max_game_len`` (``None`` pads to ``max_game_len`` in full). A lane whose
+    pending exceeds the bound at save time keeps only its most recent rows, so
+    a resume then diverges from the uninterrupted run on that lane -- set it
+    far above the typical game length."""
     pcr_full_prob: float = 1.0
     """Playout-cap randomization (KataGo): probability a self-play step runs the
     full ``num_simulations`` search and trains policy on its positions; the rest
     run ``pcr_fast_sims`` (value-only). 1.0 disables it (every position trains
     policy)."""
     pcr_fast_sims: int = 16
+
+    @model_validator(mode="after")
+    def _pad_covers_the_anneal_window(self) -> SelfPlayConfig:
+        if (
+            self.checkpoint_pad is not None
+            and self.checkpoint_pad < self.temperature_moves
+        ):
+            raise ValueError(
+                "checkpoint_pad < temperature_moves: truncation clamps a lane's "
+                "pending_len below the anneal window, so the resumed lane would "
+                "re-enter tempered sampling mid-game"
+            )
+        return self
 
 
 class OptimConfig(_Group):
