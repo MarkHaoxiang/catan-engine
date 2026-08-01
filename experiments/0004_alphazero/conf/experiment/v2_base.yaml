@@ -19,7 +19,7 @@ net:
 # one lever on top of this recipe, judged by a paired 400-game head-to-head
 # vs this arm (docs/superpowers/gpu-day-checklist.md).
 n_iterations: 300
-checkpoint_every: 10
+checkpoint_every: 50
 selfplay:
   batch: 512
   persistent: true

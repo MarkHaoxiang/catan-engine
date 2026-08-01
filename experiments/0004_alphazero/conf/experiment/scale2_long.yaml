@@ -23,7 +23,7 @@ net:
 # point, and arena_elo_se is logged so that noise is quantified, not hidden.
 # 295/(150*20) ~= 9.8% wall-share, same as the games=128/every=300 alternative.
 n_iterations: 2500
-checkpoint_every: 10
+checkpoint_every: 50
 final_games: 400
 selfplay:
   batch: 512

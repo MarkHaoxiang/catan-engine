@@ -19,7 +19,7 @@ net:
 # degree norm), so this arm ships as plain v2_base + gn_hetero. HNHN norm is
 # a follow-up, not part of this study.
 n_iterations: 300
-checkpoint_every: 10
+checkpoint_every: 50
 selfplay:
   batch: 512
   persistent: true
