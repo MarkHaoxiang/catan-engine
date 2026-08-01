@@ -263,3 +263,11 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   (runs/0004_alphazero/2026-08-01T154603Z → .../2026-08-01T174013Z); the
   sims=16 fast arm ~2.7k → ~5.3k samples/s (fast steps are where the setup
   sweep dominated).
+- 0004 backup scatter-add rejected (2026-08-01). Batching the ISMCTS
+  `_backup` per-depth point scatters into one `.at[].add` is bit-exact on
+  CPU (proved + probed) but not on CUDA: the multi-element scatter lowers
+  through `atomicAdd(float)`, which flushes subnormal f32 updates to +0.0
+  (divergence demonstrated at |v| < 1.1754944e-38; the serial form preserves
+  the bits), and the measured GPU search-step win was noise-level
+  (326.3 → 324.0 ms B=64, 930.2 → 928.1 ms B=256). Bit-exactness bar +
+  neutral win → not landed (change recoverable from the session stash).
