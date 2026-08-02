@@ -60,8 +60,10 @@ anchor) — quote `result.json` before/after at the same config. Architecture
 decisions gate through experiment 0003's distillation guard (multi-seed
 supervised fit of the production net on frozen anchor self-play targets) —
 never through short RL training runs; a guard pass earns a full-budget run
-judged by the arena-Elo gate. Record evidence there, not in package docs —
-CLAUDE.md files cite experiment numbers.
+judged by the arena-Elo gate. Search-behavior decisions screen through
+experiment 0005's search guard (a duel between two search configurations over
+a frozen anchor); a guard pass earns the training A/B. Record evidence there,
+not in package docs — CLAUDE.md files cite experiment numbers.
 
 ## Checks
 

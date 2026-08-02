@@ -41,8 +41,9 @@ uv run python experiments/NNNN_slug/run.py [variant] [k=v...]     # resolve-base
 uv run python experiments/0004_alphazero/run.py +experiment=<name> [k=v...]  # hydra-based
 ```
 
-`0002_linear_value_fitting` and `0003_neural_board_architectures` are
-resolve-based multi-variant frameworks (`0002` is the simpler example);
+`0002_linear_value_fitting`, `0003_neural_board_architectures` and
+`0005_search_guard` are resolve-based multi-variant frameworks (`0002` is the
+simpler example);
 `0004_alphazero` composes its config with hydra (`conf/` groups + `experiment/`
 presets; `-m` for sweeps) — working recipes like `scale2`, the `v2_*` study
 arms, and the `bench_throughput` throughput probe.

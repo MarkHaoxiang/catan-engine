@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -93,6 +94,77 @@ def test_0003_distill_verdict_rule() -> None:
         "mixed", {"a": True, "b": False},
     )  # fmt: skip
     assert run.distill_verdict({"a": winner}, inc) == ("recorded", {})
+
+
+def test_0005_variants_resolve_to_two_different_searches() -> None:
+    # A duel whose arms carry the same flags measures nothing, so every variant
+    # must resolve and move at least one flag off the production-default
+    # incumbent.
+    run = load_run("0005_search_guard")
+    for name, variant in run.VARIANTS.items():
+        cfg = run.SearchGuardConfig.resolve(variant)
+        assert cfg.challenger != cfg.incumbent, name
+
+
+def test_0005_screen_verdict_rule() -> None:
+    # The screen's encoded three-way rule, pure over synthetic matches: the
+    # head-to-head's 2-sigma interval entirely above the no-edge line
+    # (1/n_players) -> "promising", entirely below -> "rejected", spanning it
+    # -> "inconclusive".
+    run = load_run("0005_search_guard")
+    duel = load_run("0005_search_guard", module="duel")
+
+    def verdict(wins: int, episodes: int, n_players: int = 2) -> str:
+        match = duel.MatchResult(wins, episodes)
+        return str(run.guard_verdict(match, n_players=n_players)[0])
+
+    # 2.5 sigma over the line earns the A/B; 1.5 over does not (a 1-sigma rule
+    # would call that one promising, a 3-sigma rule would reject the first).
+    assert verdict(225, 400) == "promising"
+    assert verdict(215, 400) == "inconclusive"
+    # Mirrored below the line: only a whole interval under it is a rejection.
+    assert verdict(175, 400) == "rejected"
+    assert verdict(185, 400) == "inconclusive"
+    # The line is 1/n_players, not 50%: one 40% rate, opposite verdicts.
+    assert verdict(160, 400, n_players=3) == "promising"
+    assert verdict(160, 400) == "rejected"
+    # No decided game is no measurement, not a confident loss.
+    assert verdict(0, 0) == "inconclusive"
+
+
+def test_0005_games_default_resolves_the_ship_gate() -> None:
+    # The screen is sized for the threshold it screens for: a default budget
+    # below the 35-Elo resolution guarantees "inconclusive".
+    run = load_run("0005_search_guard")
+    duel = load_run("0005_search_guard", module="duel")
+    cfg = run.SearchGuardConfig.resolve(run.VARIANTS["chance"])
+    assert cfg.games >= duel.games_for_elo(duel.GATE_ELO)
+
+
+def test_0005_duel_rotates_seats(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The seat rotation and its accounting, with `evaluate` stubbed (real play
+    # is a GPU-scale cost): the focus arm takes every seat in turn on paired
+    # seeds, and only *its* seat's wins accumulate.
+    duel = load_run("0005_search_guard", module="duel")
+    calls: list[dict[str, Any]] = []
+    focus_wins = [7.0, 9.0]
+
+    def fake_evaluate(
+        agents: list[str], *, n_episodes: int, batch_size: int, seed: int
+    ) -> Any:
+        calls.append({"agents": list(agents), "seed": seed, "n_episodes": n_episodes})
+        wins = [100.0] * len(agents)  # a wrong seat's count is unmistakable
+        wins[agents.index("focus")] = focus_wins[len(calls) - 1]
+        return SimpleNamespace(wins=wins, episodes=n_episodes)
+
+    monkeypatch.setattr("settlrl_agents.evaluate", fake_evaluate)
+    result = duel.duel("focus", "opponent", n_players=2, games=10, batch=4, seed=3)
+
+    assert calls == [
+        {"agents": ["focus", "opponent"], "seed": 3, "n_episodes": 5},
+        {"agents": ["opponent", "focus"], "seed": 4, "n_episodes": 5},
+    ]
+    assert result == duel.MatchResult(16, 10)
 
 
 # The one genuinely tiny end-to-end 0004 run: the mlp path (not gnn -- gnn

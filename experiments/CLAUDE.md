@@ -19,7 +19,13 @@ No shared libraries live under `experiments/` (only per-framework scripts +
   handed, so it's location-independent), `Run.log` (metrics.jsonl),
   `Run.save_json`, `Run.finish` (result.json + the printed verdict). `Run` takes
   any `dir`, so a smoke test points it at `tmp_path` and skips the git/manifest
-  work.
+  work. **`start_run`'s diff digest covers tracked files only** — an untracked
+  or in-flight-edited framework is unpinnable, so commit a framework before
+  running it and leave its source alone while a run is in flight.
+- `sibling_module(framework_dir, name)`: import another framework's same-dir
+  helper (a script dir is not a package, so its directory has to reach
+  `sys.path` first). Used for the cross-framework anchor import by 0003's
+  `distill.py` and 0005's `duel.py`.
 - `Config`: the pydantic base + `resolve(base, variant, overrides)` (OmegaConf
   merge of schema-defaults ◁ variant-delta ◁ CLI dotlist, then validate). The
   pydra seam: pydantic is always the validation boundary; `extra="forbid"`, so a
@@ -187,3 +193,100 @@ incumbent's best-seed value (a zero-overlap win, lower = better) — every
 challenger passing → `"pass"`, none → `"fail"`, otherwise `"mixed"`, with
 per-challenger `beats_incumbent` booleans in `results.json`; incumbent
 absent → `"recorded"`.
+
+## `0005_search_guard/` — the cheap screen on a search-behavior change
+
+The search-side analogue of 0003's guard: a duel between two search
+configurations over one *frozen* net (`0004_alphazero/anchors.py`, imported
+cross-framework through `settlrl_learn.experiment.sibling_module`), so search
+behavior is the only difference between the sides. `duel.py` is the measurement
+layer (`Arm`, `MatchResult`, `search_settings`, `duel`, `seconds_per_move`,
+`elo_delta`, `games_for_elo`); `run.py` composes the three matches and the
+verdict. The single variant is `chance`; the incumbent is the production
+default, checked at run start against the anchor sidecar's `search_semantics`
+(a future anchor trained under different flags fails loudly instead of
+silently redefining the contrast).
+
+Why the shape:
+
+- **It is a screen, not a gate**, and the cost asymmetry runs the other way: a
+  false negative shelves an idea for good, a false positive costs one training
+  A/B. So `run.guard_verdict` reads the head-to-head's 2-sigma interval around
+  `1 / n_players` and returns three outcomes — `promising` (whole interval
+  above the line, earns the A/B), `rejected` (whole interval below),
+  `inconclusive` (spanning it, or no decided game: the measurement failed, not
+  the idea). It never demands an edge larger than the 35-Elo ship gate it
+  screens for, which the old pass rule did (+46 Elo at n=228, 31% power against
+  a true +35).
+- **`games` is sized from that threshold**: `duel.games_for_elo(35)` is ~390
+  decided games and the default 800 buys ±2 sigma of ±3.5 points (≈±24 Elo),
+  about a GPU-hour per head-to-head — still ~30x cheaper than the A/B it
+  screens.
+- **A head-to-head alone hides a shared regression**, so both arms also play
+  `lookahead`, the Elo-0 reference, and `run.reference_gap` reports the
+  difference. Reported, never gating: at `reference_games=80` per arm its
+  2-sigma band is ~90 Elo, inert as a rule but still the number that shows a
+  reader the head-to-head and the outside arm pointing opposite ways. The two
+  arms start their reference matches from the same seed, so they meet it from
+  the same *initial* boards, but the matches diverge at the first differing
+  decision and auto-reset then regenerates boards at different steps (101 vs
+  106 decided games on one seed) — the rates are independent binomials, not a
+  paired comparison.
+- **Equal simulations is not equal wall-clock**, so every arm is priced
+  (`seconds_per_move`) and `wall_clock_matched` re-runs the head-to-head with
+  the challenger's `num_simulations` scaled by the measured ratio. That ratio
+  is load-bearing and a single window is not stable enough for it (two probes
+  of the same arms disagreed by 13% and 37%), hence the median over
+  `timing_repeats` windows. A short timing window measures the same rate as a
+  long one because the price is phase-independent: the net agent selects
+  between its search and the setup opener with a `where`, so both run on every
+  step of every lane.
+- **Budget model** (per seating): no lane finishes before a whole game, so
+  wall-clock ≈ `game_length × (batch + games_per_seating) × the per-move cost
+  of both seats`. Lanes past what a seating harvests buy nothing, which is why
+  `batch` sits under the games per seating rather than at the arena's 128.
+  Per-move cost, az2 at 128 sims / 16 considered (RTX 5090, batch
+  32/64/128/256): incumbent 10.96 / 8.52 / 8.28 / 9.24 ms, `chance_nodes`
+  5.34 / 2.98 / 1.74 / 1.17 ms, `ordered` 8.04 ms at 128 — all measured with
+  the play path's `expected_rolls=True`, i.e. not the contrast the guard runs
+  (below).
+
+Two play-time semantics that shape what the guard can measure:
+
+- `GNNBackend.play_agent` (and `make_net_agent` under it) does not thread
+  `expected_rolls`, so anything routed through it runs `make_search`'s default
+  — the exact 11-roll leaf expectation — while production self-play runs
+  `expected_rolls: false`. `chance_nodes` *supersedes* the flag (forced off by
+  `SearchConfig`), so an arm pair built that way differs in two leaf semantics
+  at 984 vs 141 MFLOP/search, not in the one the variant names. `duel._net_agent`
+  therefore composes `gnn_seams` + `make_search` + the setup opener itself, and
+  `duel.search_settings` raises if validation rewrites any flag an arm asked
+  for. Threading `expected_rolls` through `play_agent` is a production fix that
+  would let the duel go back through it.
+- `ordered` **cannot be screened here** and has no variant. At play time the
+  ordering overlay never reaches the root: `settlrl_agents.evaluate` builds its
+  env without `track_ordering`, and the overlay lives in `BatchedSettlrlEnv.step`,
+  not in the fused `_rollout_core` a rollout runs. An arm would search a
+  tree-pruned model of an unrestricted environment — inconsistent with its own
+  env and strictly handicapped, which is not the flag's contract
+  (`ismcts/loop.py`). The prerequisite is an engine change: `track_ordering`
+  threaded through the fused rollout path. (At 2 players there is also no
+  domestic trade, so the lock-out would only order builds and buys.)
+
+`n_players` runs the duel as a seat rotation and the verdict against
+`1 / n_players`, but the committed anchors are 2p-trained and **stall at 3
+players** — see `report.md`'s Scope for the measurement. A 3p duel needs a
+3p-capable net before it measures anything.
+
+`duel.duel` is 0002's `seat_rotated` in another framework: the library's own
+`arena_spec` is 2 players only and hands both sides the same simulation count,
+neither of which fits a duel whose arms may differ in budget.
+
+The `smoke` variant is a manual CLI recipe
+(`run.py smoke`), not a test: even at `sims=0` an in-suite `run_experiment`
+costs ~120 s, which the 2-3 minute suite budget does not have room for (0004's
+`gnn_smoke` preset is kept the same way — composed in the suite, run by hand).
+What the suite does cover is the composition and the pure logic: variants
+resolve to two different searches, the three-way verdict rule at its 2-sigma
+boundaries, the default `games` against `games_for_elo`, and the seat rotation
+with `evaluate` stubbed.

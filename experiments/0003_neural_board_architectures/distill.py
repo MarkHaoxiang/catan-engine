@@ -14,12 +14,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from pathlib import Path
-from types import ModuleType
 from typing import Any, cast
 
 import numpy as np
+from settlrl_learn.experiment import sibling_module
 from settlrl_learn.training.config import (
     LearnConfig,
     SearchSettings,
@@ -44,23 +43,13 @@ def _key(anchor: str, sims: int, batch: int, n_samples: int, seed: int) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
-def _anchor_module() -> ModuleType:
-    if str(_ALPHAZERO_DIR) not in sys.path:
-        sys.path.insert(0, str(_ALPHAZERO_DIR))
-    # cross-framework sibling import (0004_alphazero/anchors.py); no stub
-    # there since script dirs aren't packages.
-    import anchors  # type: ignore[import-not-found]
-
-    return cast(ModuleType, anchors)
-
-
 def learn_config(anchor: str, sims: int, batch: int, n_samples: int) -> LearnConfig:
     """The minimal ``LearnConfig`` the dataset is generated under: ``q``
     recording on (``value_blend.max > 0`` -- the loop's own predicate), the
     production opening-temperature schedule, PCR off (every position
     full-search, ``train_policy`` all 1), and the search semantics the anchor
     sidecar pins."""
-    anchors = _anchor_module()
+    anchors = sibling_module(_ALPHAZERO_DIR, "anchors")
     meta = json.loads((anchors.ANCHOR_DIR / f"{anchor}.json").read_text())
     semantics = meta["search_semantics"]
     return LearnConfig(
@@ -115,7 +104,7 @@ def generate(
     from settlrl_learn.training import GNNBackend
     from settlrl_learn.training.loop import run_selfplay, selfplay_callables
 
-    anchors = _anchor_module()
+    anchors = sibling_module(_ALPHAZERO_DIR, "anchors")
     net, netcfg = anchors.load_anchor(anchor)
     cfg = learn_config(anchor, sims, batch, n_samples)
     backend = GNNBackend(

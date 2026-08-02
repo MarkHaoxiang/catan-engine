@@ -6,7 +6,8 @@ an ordinary pytree, `.npz` artifacts) is deliberately dependency-free so a
 trained model can ship without training libraries.
 
 `experiment/` is the lab harness for `experiments/` (`Run`/`start_run`
-bookkeeping + the pydantic/OmegaConf `Config` base) — a training-side
+bookkeeping, the pydantic/OmegaConf `Config` base, `sibling_module` for
+cross-framework helper imports) — a training-side
 concern, kept out of settlrl-agents. *Not* imported by `__init__`, so
 `import settlrl_learn` (and the play/serve library) stays free of
 `pydantic`/`omegaconf`, which are learn deps only because this subpackage

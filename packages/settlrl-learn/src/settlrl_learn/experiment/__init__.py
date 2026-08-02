@@ -8,5 +8,6 @@ config dependencies.
 
 from settlrl_learn.experiment.bookkeeping import Run, start_run
 from settlrl_learn.experiment.config import Config
+from settlrl_learn.experiment.siblings import sibling_module
 
-__all__ = ["Config", "Run", "start_run"]
+__all__ = ["Config", "Run", "sibling_module", "start_run"]
