@@ -195,3 +195,24 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   structure, targets), not volume. Side note: `checkpoint_truncated_lanes`
   fired 2 and 3 at the first two checkpoints then 0 for all 18 after — the
   pad-512 tail only binds during early weak play, when games run long.
+- 0005_search_guard — framework adopted; `chance_nodes` excluded at the ship
+  gate (2026-08-02, run 2026-08-02T193349Z, ~51 GPU-min). The guard duels two
+  search configurations over a frozen anchor (az2, 128 sims / 16 considered,
+  seat-rotated paired seeds) and screens with a 2-sigma interval around the
+  no-edge line: promising / rejected / inconclusive. First measurement:
+  `chance_nodes` vs the production default, one flag apart, **821 decided
+  games: 49.8% +/- 1.75%, Elo -1.3 +/- 12.1** — verdict `inconclusive` by the
+  rule, but the upper bound (+23 Elo) **excludes a gain at or above the
+  35-Elo ship gate**, so it does not earn the ~32 GPU-h training A/B. Cost is
+  identical at production semantics (4.077 vs 4.083 ms/move) — the earlier
+  "chance is 5x cheaper" reading was an `expected_rolls` confound, since
+  `GNNBackend.play_agent` does not thread it and `chance_nodes` forces it off
+  (that play-time/train-time mismatch is a production bug, still open).
+  `ordered` is NOT evaluable here: at play time the ordering overlay never
+  reaches the root (`evaluate` builds the env without `track_ordering`, and
+  the overlay lives outside the fused rollout core), so an arm would measure
+  a tree pruned inconsistently with its own env; threading it is an engine
+  change and the prerequisite. Caveat on all guard readings: `evaluate`
+  discards games still in flight at the budget (~14% here, systematically
+  the longest), and this gate is play-time only — better search also makes
+  better training targets, which no duel can see.
