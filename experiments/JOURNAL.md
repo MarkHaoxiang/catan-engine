@@ -177,3 +177,21 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   with a cliff at the width where the batched tree leaves L3 (not an emitted
   copy — HLO census clean). GPU repeat of that mechanism is the next step;
   if it is CPU-only cache pressure, both leads close.
+- 0004 v2_hetero 5000-iter — gate pass, but scaling did NOT convert
+  (2026-08-02, run 2026-08-01T215549Z, 16.6 h). Double the iteration budget
+  on the post-wave recipe (B=1024, ~4x az2's self-play volume in samples):
+  final gauntlet **arena_elo 196.10 +/- 9.11** (gate `elo - 2*se >= 35`
+  passes at 177.9), yet **head-to-head vs az2 is 0.485** — a tie — and the
+  delta to az2's own reading (186.76 +/- 10.88) is +9.3 Elo at 0.66 sigma.
+  vs az1 0.623, vs az0 0.827, vs random 1.0. The in-loop curve plateaus from
+  ~iteration 2400 (196-250, no trend, 18 rounds) — i.e. az2's stopping point
+  was already the plateau. **The under-scaling hypothesis is falsified at
+  this scale for "more of the same": 2x iterations / ~4x samples buys
+  nothing measurable.** No anchor minted (a rung that ties az2 adds no
+  information to the ladder). Confound noted: the recipe also changed
+  (B=512->1024, blocked linears), so this is not a pure iteration sweep —
+  but both changes are throughput-only or function-preserving, which makes
+  the null stronger, not weaker. Next levers are qualitative (search
+  structure, targets), not volume. Side note: `checkpoint_truncated_lanes`
+  fired 2 and 3 at the first two checkpoints then 0 for all 18 after — the
+  pad-512 tail only binds during early weak play, when games run long.
