@@ -161,3 +161,19 @@ Full evidence lives in each experiment's `report.md`; raw outputs under
   `distill_verdict` fail, no full-budget run. Consistent with per-node
   LayerNorm already absorbing degree-dependent scale; the lever stays a
   `GraphNetConfig` ablation knob (default off, off-path byte-identical).
+- Action-axis narrowing rejected (2026-08-02, CPU profile). At 2p main-loop
+  search 228/662 flat rows are always illegal (126 setup + 102 domestic
+  trade), but slicing the tree's `act` axis does not pay. Tree select/backup
+  do scale with width (W^1.25-1.35 at B>=64; 662->434 cuts them 35-43%) —
+  the old `tree.py` TODO's premise was wrong — yet they are only 5-10% of a
+  search behind the net forwards (~71%), so the ceiling is ~2-4% CPU and
+  <=2-3% GPU by analogy with the root-sweep removal (1-2.5%), at or below
+  the gauge's noise floor, against a wide index-surface change (`act` is
+  also the chance-outcome axis; policy targets would need scatter-back).
+  The 100 trade rows are separately worthless: dropping them from the flat
+  mask saves <=0.11 us/lane of 3.51 (3%, in-noise) — the `n > 2` gate folds
+  to a constant. Open lead from the same run: select+expand+backup together
+  cost 2-7x the sum of the isolated ops, excess proportional to n_nodes,
+  with a cliff at the width where the batched tree leaves L3 (not an emitted
+  copy — HLO census clean). GPU repeat of that mechanism is the next step;
+  if it is CPU-only cache pressure, both leads close.

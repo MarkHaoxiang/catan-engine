@@ -47,10 +47,9 @@ class _Tree(NamedTuple):
     exact values); ``w`` / ``prior`` / ``raw`` stay float32.
     """
 
-    # TODO(perf): the 126 setup rows (a contiguous [0:126] prefix of N_FLAT) are
-    # always illegal in the main loop, where ISMCTS runs, so the `act` axis could
-    # be the suffix slice. Profile first — the cost is the per-descent engine
-    # steps + roll_ev, not the action-axis width, so this likely won't move it.
+    # Narrowing `act` to the rows reachable in the main loop is measured not to
+    # pay: the tree ops do scale with the width, but they are a small share of a
+    # search behind the net forwards (2026-08-02 JOURNAL line).
 
     mover: _NodeI  # int8 player id
     children: _EdgeI  # child node id per edge, -1 = unexpanded (narrow node dtype)
