@@ -58,6 +58,7 @@ class SearchSemantics(NamedTuple):
     sims: int
     considered: int
     batch: int
+    expected_rolls: bool
     chance_nodes: bool
     dev_chance: bool
     ordered: bool
@@ -94,6 +95,7 @@ def _scale_defaults() -> SearchSemantics:
         sims=int(arena["sims"]),
         considered=int(arena["considered"]),
         batch=int(arena["batch"]),
+        expected_rolls=bool(search["expected_rolls"]),
         chance_nodes=bool(search["chance_nodes"]),
         dev_chance=bool(search["dev_chance"]),
         ordered=bool(search["ordered"]),
@@ -184,6 +186,7 @@ def run_match(
         setup_depth=a.setup.depth,
         setup_temperature=a.setup.temperature,
         setup_beam=a.setup.beam,
+        expected_rolls=sem.expected_rolls,
         chance_nodes=sem.chance_nodes,
         dev_chance=sem.dev_chance,
         ordered=sem.ordered,
@@ -193,6 +196,7 @@ def run_match(
         setup_depth=b.setup.depth,
         setup_temperature=b.setup.temperature,
         setup_beam=b.setup.beam,
+        expected_rolls=sem.expected_rolls,
         chance_nodes=sem.chance_nodes,
         dev_chance=sem.dev_chance,
         ordered=sem.ordered,

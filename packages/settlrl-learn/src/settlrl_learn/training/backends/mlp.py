@@ -64,12 +64,14 @@ class MLPBackend:
         hidden: Sequence[int],
         *,
         value_weight: float = 1.0,
+        expected_rolls: bool = True,
         chance_nodes: bool = False,
         dev_chance: bool = True,
         ordered: bool = False,
     ) -> None:
         self.hidden = tuple(hidden)
         self.value_weight = value_weight
+        self.expected_rolls = expected_rolls
         self.chance_nodes = chance_nodes
         self.dev_chance = dev_chance
         self.ordered = ordered
@@ -91,8 +93,8 @@ class MLPBackend:
             value_fn, prior=prior_fn, value_scale=2.0,
             num_simulations=num_simulations,
             max_num_considered_actions=max_num_considered_actions,
-            chance_nodes=self.chance_nodes, dev_chance=self.dev_chance,
-            ordered=self.ordered,
+            expected_rolls=self.expected_rolls, chance_nodes=self.chance_nodes,
+            dev_chance=self.dev_chance, ordered=self.ordered,
         )  # fmt: skip
 
     def observe(

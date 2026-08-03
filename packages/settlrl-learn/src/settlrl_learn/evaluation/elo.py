@@ -1,11 +1,15 @@
 """Anchored Elo: a single comparable strength number per checkpoint.
 
 The arena scores the net against a *fixed* set of anchors whose Elo never moves
-(``random``, ``lookahead(heuristic)`` pinned at 0, optionally frozen self-play
-checkpoints). :func:`anchored_elo` then places the net on that fixed scale by
-maximum likelihood, so the per-iteration number is comparable across the whole
-run and across runs -- the AlphaZero/MuZero anchored-baseline scheme, not a
-within-pool round-robin (which drifts when the pool changes).
+(``lookahead(heuristic)`` pinned at 0, optionally ``random`` and frozen
+self-play checkpoints). :func:`anchored_elo` then places the net on that fixed
+scale by maximum likelihood -- the AlphaZero/MuZero anchored-baseline scheme,
+not a within-pool round-robin (which drifts when the pool changes).
+
+The number is comparable wherever the anchor set and its pinned Elos are the
+same: within a run, across its checkpoints, always; across runs only when they
+scored against the same anchors under the same search semantics (the end-of-run
+gauntlet, where nothing is skipped).
 
 A training-side module: not imported by the package root.
 """

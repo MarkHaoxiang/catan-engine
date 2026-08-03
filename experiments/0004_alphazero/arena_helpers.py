@@ -61,7 +61,8 @@ def build_net_opponents(
             netcfg, setup_depth=NET_OPPONENT_SETUP_DEPTH,
             setup_temperature=NET_OPPONENT_SETUP_TEMPERATURE,
             setup_beam=NET_OPPONENT_SETUP_BEAM,
-            chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
+            expected_rolls=s.expected_rolls, chance_nodes=s.chance_nodes,
+            dev_chance=s.dev_chance, ordered=s.ordered,
         )  # fmt: skip
         out[name] = (NetOpponent(backend, net), opp.elo, opp.every, opp.phase)
     return out
@@ -156,7 +157,8 @@ def run_bench(run: Run, cfg: AlphaZeroConfig) -> None:
     backend = GNNBackend(
         netcfg, setup_depth=cfg.net.setup_depth,
         setup_temperature=cfg.net.setup_temperature, setup_beam=cfg.net.setup_beam,
-        chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
+        expected_rolls=s.expected_rolls, chance_nodes=s.chance_nodes,
+        dev_chance=s.dev_chance, ordered=s.ordered,
     )  # fmt: skip
     results = bench_selfplay(
         backend, net, cfg.to_learn_config(),

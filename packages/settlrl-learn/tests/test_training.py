@@ -95,6 +95,61 @@ empty_item:
     )
 
 
+def _play_agent_search(
+    backend: Backend, module: str, monkeypatch: pytest.MonkeyPatch
+) -> SearchSettings:
+    """The search configuration ``backend.play_agent`` resolves, captured at the
+    backend module's ``make_search`` seam (no agent is built, no game played)."""
+    captured: dict[str, Any] = {}
+
+    def _capture(_value_fn: Any, **kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return lambda *args: None
+
+    monkeypatch.setattr(f"{module}.make_search", _capture)
+    backend.play_agent(
+        backend.init(jax.random.key(0)),
+        num_simulations=4,
+        max_num_considered_actions=4,
+    )
+    return SearchSettings(
+        num_simulations=captured["num_simulations"],
+        max_considered=captured["max_num_considered_actions"],
+        value_scale=captured["value_scale"],
+        expected_rolls=captured["expected_rolls"],
+        chance_nodes=captured["chance_nodes"],
+        dev_chance=captured["dev_chance"],
+        ordered=captured["ordered"],
+    )
+
+
+def test_play_agent_search_takes_the_backend_expected_rolls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The leaf semantics the loop trains under must also be the ones it is
+    # evaluated under: `search.expected_rolls` reaches the play agent, and a
+    # backend that doesn't set it keeps the search factory's default.
+    gnn_cfg = PRESETS["gn_global"]._replace(width=8, layers=1)
+    cases: list[tuple[str, Backend, bool]] = [
+        ("settlrl_learn.training.backends.mlp", MLPBackend((16,)), True),
+        ("settlrl_learn.training.backends.gnn", GNNBackend(gnn_cfg), True),
+        (
+            "settlrl_learn.training.backends.mlp",
+            MLPBackend((16,), expected_rolls=False),
+            False,
+        ),
+        (
+            "settlrl_learn.training.backends.gnn",
+            GNNBackend(gnn_cfg, expected_rolls=False),
+            False,
+        ),
+    ]
+    for module, backend, expected in cases:
+        assert (
+            _play_agent_search(backend, module, monkeypatch).expected_rolls is expected
+        )
+
+
 def test_runstate_serialise_roundtrip_is_bit_exact(tmp_path: Path) -> None:
     # The resume invariant at the serialization layer (no training): a fresh
     # RunState round-trips bit-exactly through eqx for both backends.
@@ -505,6 +560,23 @@ def test_mlp_loss_masks_policy_by_train_policy() -> None:
     assert abs(float(a_full["value_loss"]) - float(a_half["value_loss"])) < 1e-5
     # masked policy loss == the policy loss over the unmasked subset alone.
     assert abs(float(a_half["policy_loss"]) - float(a_first3["policy_loss"])) < 1e-4
+
+
+def test_gnn_eval_policy_convergence_is_over_full_search_positions() -> None:
+    # The search-vs-net convergence metrics are defined over full-search targets
+    # (a PCR fast-search target is not that quantity), so the mixed batch must
+    # score exactly what its train_policy=1 subset scores alone.
+    backend = GNNBackend(PRESETS["gn_global"]._replace(width=8, layers=1))
+    samples, _, _ = self_play(
+        n_samples=8, batch_size=4, seed=0, **jitted(uniform_legal_dist, backend)
+    )
+    samples["train_policy"][1::2] = 0.0
+    net = backend.init(jax.random.key(0))
+    mixed = backend.eval_metrics(net, backend.to_item(samples))
+    full = {k: v[samples["train_policy"] > 0] for k, v in samples.items()}
+    subset = backend.eval_metrics(net, backend.to_item(full))
+    for metric in ("val_policy_top1_agree", "val_policy_kl"):
+        assert abs(float(mixed[metric]) - float(subset[metric])) < 1e-5
 
 
 def test_bool_item_dtypes_are_loss_and_grad_bit_exact_with_float32() -> None:

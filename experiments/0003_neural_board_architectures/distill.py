@@ -112,6 +112,7 @@ def generate(
         setup_depth=anchors.NET_OPPONENT_SETUP_DEPTH,
         setup_temperature=anchors.NET_OPPONENT_SETUP_TEMPERATURE,
         setup_beam=anchors.NET_OPPONENT_SETUP_BEAM,
+        expected_rolls=cfg.search.expected_rolls,
         chance_nodes=cfg.search.chance_nodes,
         dev_chance=cfg.search.dev_chance,
         ordered=cfg.search.ordered,

@@ -1,22 +1,18 @@
 games: 128          # ~= the eval batch (the evaluator overshoots to ~batch anyway)
-every: 10           # production presets override cadence to games=64/every=150;
-                    # measured pre-rotation (2026-07-31 hetero run, all three net
-                    # rungs every round): arena = 24.9% of wall, mean 870 s/round.
+every: 10           # production presets override cadence to games=64/every=150.
                     # The rungs below rotate at every:3 with staggered phases, so
-                    # ~1 net rung fires per round (lookahead still every round) --
-                    # the in-loop Elo pools 3 anchors/round instead of 5 (SE
-                    # ~20 -> ~27); the final gauntlet neutralizes every schedule.
+                    # each round pools two anchors: lookahead plus one net rung.
+                    # The final gauntlet neutralizes every schedule.
 batch: 128
 sims: 24
 considered: 16
-opponents: [lookahead, random]
+# lookahead only: `random` saturates at a 1.0 win rate within ~10 iterations, and
+# a saturated anchor is continuity-corrected and nearly flat in the likelihood --
+# it costs a round's games and moves the MLE by ~nothing. It stays in the
+# round-robin of calibrate.py, where spanning the scale does inform the joint fit.
+opponents: [lookahead]
 anchor_elos:
   lookahead: 0.0
-  # calibrated 2026-07-29 (experiments/0004_alphazero/calibrate.py, joint MLE
-  # over random/greedy/lookahead/mcts/az0, n=4238 total; see JOURNAL.md).
-  random: -1115.0
-opponent_every:
-  random: 5         # random has been 1.0 from iter ~9 on -- sample it, not every round
 # The frozen rungs rotate (every: 3, phases 0/1/2 -- one per round). Do NOT
 # reorder or remove entries: each rung's arena seed derives from its dict
 # enumeration position (steps.NET_OPPONENT_SEED_BASE + k*10_000), so order

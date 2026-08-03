@@ -166,7 +166,8 @@ def run_gnn_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     backend = GNNBackend(
         netcfg, value_weight=cfg.net.value_weight, setup_depth=cfg.net.setup_depth,
         setup_temperature=cfg.net.setup_temperature, setup_beam=cfg.net.setup_beam,
-        chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
+        expected_rolls=s.expected_rolls, chance_nodes=s.chance_nodes,
+        dev_chance=s.dev_chance, ordered=s.ordered,
     )  # fmt: skip
     resume, wandb_id = _resume_state(cfg.resume_from)
     wb = wandb.init(
@@ -236,7 +237,8 @@ def run_experiment(run: Run, cfg: AlphaZeroConfig) -> None:
     s = cfg.search
     backend = MLPBackend(
         (cfg.net.width,) * cfg.net.depth, value_weight=cfg.net.value_weight,
-        chance_nodes=s.chance_nodes, dev_chance=s.dev_chance, ordered=s.ordered,
+        expected_rolls=s.expected_rolls, chance_nodes=s.chance_nodes,
+        dev_chance=s.dev_chance, ordered=s.ordered,
     )  # fmt: skip
 
     # Resume: restore the prior run's RunState and continue its wandb run so the

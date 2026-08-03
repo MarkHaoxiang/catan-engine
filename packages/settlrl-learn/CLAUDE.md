@@ -332,12 +332,15 @@ uses them.
     (outcome blended with the searched root `q` from
     `make_search_weights_value`, α ramped 0→max over `cfg.value_blend.ramp`
     iters) — the dice-variance fix; only the training slice is blended, the eval
-    slice keeps raw `z` (see the Canopy reference below). `cfg.search.chance_nodes`
-    /`dev_chance` (explicit dice/dev chance nodes) and `cfg.search.ordered`
-    (the `settlrl_engine.ordering` action lock-out, via self-play's
-    `track_ordering`) thread through self-play and the arena `play_agent`
-    alike, so both plan past rolls and respect the lock-out at train and play
-    time.
+    slice keeps raw `z` (see the Canopy reference below). The search *semantics*
+    — `cfg.search.expected_rolls` (the roll-leaf EV), `chance_nodes`/`dev_chance`
+    (explicit dice/dev chance nodes) and `ordered` (the `settlrl_engine.ordering`
+    action lock-out, via self-play's `track_ordering`) — thread through self-play
+    and the arena `play_agent` alike (the backend carries them for the play
+    side), so the net is evaluated under the leaf and lock-out semantics it is
+    trained under. A backend built without them keeps `make_search`'s own
+    defaults; `test_play_agent_search_takes_the_backend_expected_rolls` pins the
+    threading at the search config, not at play.
     `loop.selfplay_callables(backend, cfg, net)` builds the once-built
     jitted+vmapped self-play callables (`view_of` / `observe_of` / `setup_search`
     + a `make_net_search(num_simulations)` factory closing over the net's *static*
@@ -385,15 +388,27 @@ uses them.
     completed-game count, not the requested `n_games` (`evaluate`'s win-count sync
     happens between scan windows, so it overshoots) — real `(wins, episodes)`, not
     `winrate * n_games`, feed the Elo MLE. `steps.run_arena` plays each
-    `cfg.arena.opponents` entry and reports `arena_winrate` / `arena_vs_<opp>`
+    `cfg.arena.opponents` entry and reports `arena_winrate` / `arena_vs_<opp>`,
+    each with its `arena_episodes_<opp>` denominator (so a run's headline
+    strength number stays auditable from `metrics.jsonl` alone),
     **plus `arena_elo`** — the MLE Elo (`evaluation/elo.py::anchored_elo`) on the
-    fixed `cfg.arena.anchor_elos` scale (heuristic pinned at 0 = the gate; random
-    well below) — **and `arena_elo_se`**, its standard error (`anchored_elo_se`,
-    Fisher information at the MLE).
+    fixed `cfg.arena.anchor_elos` scale (heuristic pinned at 0 = the gate) —
+    **and `arena_elo_se`**, its standard error (`anchored_elo_se`, Fisher
+    information at the MLE). `arena_elo` is **run-local**: valid for comparing
+    checkpoints within a run, not as a cross-run absolute (the final gauntlet,
+    where every rung plays, is the cross-run reading). Each anchor that played
+    also reports `arena_elo_vs_<name>`, the single-anchor MLE from that opponent
+    alone — free, and it exposes the pinned rungs' disagreement directly, which
+    the rotation (below) otherwise folds into a per-round sawtooth on the pooled
+    number (measured on the 5000-iter run: az0 rounds 224.6, az1 215.7, az2
+    199.9 post-plateau).
     `cfg.arena.opponent_every` (opponent → N) skips an opponent on rounds where
-    `run_arena`'s `round_index` isn't a multiple of N, saving wall-clock on
-    anchors that no longer carry information (e.g. `random`, which pins at 1.0
-    winrate early). **Frozen checkpoints join the gauntlet** through
+    `run_arena`'s `round_index` isn't a multiple of N, saving wall-clock on an
+    anchor that no longer carries information. A *saturated* anchor carries none
+    at all — continuity-corrected and nearly flat in the likelihood — which is
+    why the production ladder seats `lookahead` plus the frozen rungs and leaves
+    `random` to 0004's `calibrate.py` round-robin, where spanning the scale does
+    inform the joint fit. **Frozen checkpoints join the gauntlet** through
     `learn(..., net_opponents={name: (opponent, elo, every, phase)})` →
     `run_arena`: ready specs or `NetOpponent`s, so the library never learns
     about checkpoint files or architectures — the experiment composes them
@@ -421,7 +436,16 @@ uses them.
     checkpoint round-robin (a within-pool round-robin drifts when the pool
     changes). Anchors must stay frozen for a run. The per-iter `val_*` /
     `policy_*` / `value_*` health metrics (`Backend.eval_metrics`) are the
-    cheap high-frequency proxies between arena rounds.
+    cheap high-frequency proxies between arena rounds. Those are *fit* metrics;
+    the AlphaZero-native convergence signal — how much the search still improves
+    on the raw net policy — is `val_policy_top1_agree` and `val_policy_kl`
+    (KL(search target ‖ net policy) over the masked softmax), scored on
+    `train_policy` = 1 positions only, since a playout-cap fast-search target is
+    not the quantity meant. Same definitions 0003's distillation guard selects
+    on (`distill_train.py`'s `top1_agree` / `policy_kl`), so the guard and the
+    loop speak one language. GNN backend only: `MLPItem` carries no legality
+    mask (that path's policy CE is unmasked by design), so a legal-masked
+    agreement/KL is undefined there.
     The optimiser is `steps.make_optimizer(cfg.optim)` — adamw, optionally
     preceded by `clip_by_global_norm` (`cfg.optim.grad_clip`, default 1.0; 0
     disables). Stateless, so an unclipped checkpoint must resume with

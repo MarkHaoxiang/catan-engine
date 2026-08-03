@@ -247,22 +247,20 @@ Why the shape:
   `batch` sits under the games per seating rather than at the arena's 128.
   Per-move cost, az2 at 128 sims / 16 considered (RTX 5090, batch
   32/64/128/256): incumbent 10.96 / 8.52 / 8.28 / 9.24 ms, `chance_nodes`
-  5.34 / 2.98 / 1.74 / 1.17 ms, `ordered` 8.04 ms at 128 — all measured with
-  the play path's `expected_rolls=True`, i.e. not the contrast the guard runs
-  (below).
+  5.34 / 2.98 / 1.74 / 1.17 ms, `ordered` 8.04 ms at 128 — all measured at
+  `expected_rolls=True`, i.e. not the contrast the guard runs (below).
 
 Two play-time semantics that shape what the guard can measure:
 
-- `GNNBackend.play_agent` (and `make_net_agent` under it) does not thread
-  `expected_rolls`, so anything routed through it runs `make_search`'s default
-  — the exact 11-roll leaf expectation — while production self-play runs
-  `expected_rolls: false`. `chance_nodes` *supersedes* the flag (forced off by
-  `SearchConfig`), so an arm pair built that way differs in two leaf semantics
-  at 984 vs 141 MFLOP/search, not in the one the variant names. `duel._net_agent`
-  therefore composes `gnn_seams` + `make_search` + the setup opener itself, and
-  `duel.search_settings` raises if validation rewrites any flag an arm asked
-  for. Threading `expected_rolls` through `play_agent` is a production fix that
-  would let the duel go back through it.
+- An arm is a whole validated `SearchSettings`, wider than
+  `make_net_agent`'s keyword surface (which fixes `value_scale` and takes no
+  `max_depth`/`fused_leaf`), so `duel._net_agent` composes `gnn_seams` +
+  `make_search` + the setup opener itself instead of routing through
+  `GNNBackend.play_agent`, and `duel.search_settings` raises if validation
+  rewrites any flag an arm asked for. It has to: `chance_nodes` *supersedes*
+  `expected_rolls` (forced off by `SearchConfig`), so an arm pair that let that
+  through would differ in two leaf semantics at 984 vs 141 MFLOP/search, not in
+  the one the variant names.
 - `ordered` **cannot be screened here** and has no variant. At play time the
   ordering overlay never reaches the root: `settlrl_agents.evaluate` builds its
   env without `track_ordering`, and the overlay lives in `BatchedSettlrlEnv.step`,

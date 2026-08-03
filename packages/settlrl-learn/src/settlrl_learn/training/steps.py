@@ -105,11 +105,19 @@ def run_arena(
     | None = None,
 ) -> dict[str, float]:
     """Play the net against each configured opponent; ``lookahead`` -> the gate
-    metric ``arena_winrate``, others -> ``arena_vs_<opponent>``, plus ``arena_elo``
-    -- the MLE Elo on the fixed ``anchor_elos`` scale -- and ``arena_elo_se``, its
-    standard error. Opponents get well-separated seeds (``seed + j*10_000``); the
-    loop holds ``seed`` fixed across iterations so every checkpoint faces the same
-    games (a paired strength curve).
+    metric ``arena_winrate``, others -> ``arena_vs_<opponent>``, each alongside
+    ``arena_episodes_<opponent>`` (the decided-game count its rate is over), plus
+    ``arena_elo`` -- the MLE Elo on the fixed ``anchor_elos`` scale -- and
+    ``arena_elo_se``, its standard error. Opponents get well-separated seeds
+    (``seed + j*10_000``); the loop holds ``seed`` fixed across iterations so every
+    checkpoint faces the same games (a paired strength curve).
+
+    ``arena_elo`` is **run-local**: an MLE on this run's pinned anchor scale, so
+    it compares checkpoints within a run, not runs against each other (the
+    end-of-run gauntlet is the cross-run reading). Each anchor that played also
+    reports ``arena_elo_vs_<opponent>`` -- the single-anchor MLE from that
+    opponent alone -- so a rotating anchor set's disagreement is visible in the
+    per-round pooled number instead of riding in it.
 
     ``round_index`` counts arena invocations (not training iterations); an
     opponent with ``cfg.opponent_every[opp] = N`` is skipped unless
@@ -139,8 +147,11 @@ def run_arena(
         metrics["arena_winrate" if opp == "lookahead" else f"arena_vs_{opp}"] = (
             res.winrate
         )
+        metrics[f"arena_episodes_{opp}"] = float(res.episodes)
         if opp in cfg.anchor_elos:
-            elo_inputs.append((cfg.anchor_elos[opp], res.wins, res.episodes))
+            anchor = (cfg.anchor_elos[opp], res.wins, res.episodes)
+            elo_inputs.append(anchor)
+            metrics[f"arena_elo_vs_{opp}"] = anchored_elo([anchor])
     for k, (name, (spec, elo, every, phase)) in enumerate(
         (net_opponents or {}).items()
     ):
@@ -153,6 +164,8 @@ def run_arena(
             seed=seed + NET_OPPONENT_SEED_BASE + k * 10_000,
         )  # fmt: skip
         metrics[f"arena_vs_{name}"] = res.winrate
+        metrics[f"arena_episodes_{name}"] = float(res.episodes)
+        metrics[f"arena_elo_vs_{name}"] = anchored_elo([(elo, res.wins, res.episodes)])
         elo_inputs.append((elo, res.wins, res.episodes))
     if elo_inputs:
         metrics["arena_elo"] = anchored_elo(elo_inputs)

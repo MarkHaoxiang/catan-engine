@@ -122,10 +122,10 @@ def _net_agent(net: Any, settings: SearchSettings, *, n_players: int) -> BeliefP
     legal action, the net's search after it) with every flag of ``settings``
     reaching the search.
 
-    Composed here rather than through ``GNNBackend.play_agent``, which threads
-    only three of them: an arm routed through it runs ``make_search``'s
-    ``expected_rolls=True`` default, so a ``chance_nodes`` duel — which forces
-    that flag off — would move two leaf semantics where the variant names one.
+    Composed here rather than through ``GNNBackend.play_agent``: an arm is a
+    whole ``SearchSettings`` (``max_depth``, ``value_scale``, ``fused_leaf``),
+    wider than the backend's keyword surface, and a duel has to move exactly
+    the flags its variant names.
     """
     import jax.numpy as jnp
     from settlrl_engine.mechanics.action import ActionType

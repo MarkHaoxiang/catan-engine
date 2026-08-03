@@ -77,6 +77,7 @@ def make_net_agent(
     setup_depth: int = 1,
     setup_temperature: float = 2.0,
     setup_beam: int = 4,
+    expected_rolls: bool = True,
     chance_nodes: bool = False,
     dev_chance: bool = True,
     ordered: bool = False,
@@ -88,7 +89,8 @@ def make_net_agent(
         value_fn, prior=prior_fn, value_scale=2.0,
         num_simulations=num_simulations,
         max_num_considered_actions=max_num_considered_actions,
-        chance_nodes=chance_nodes, dev_chance=dev_chance, ordered=ordered,
+        expected_rolls=expected_rolls, chance_nodes=chance_nodes,
+        dev_chance=dev_chance, ordered=ordered,
     )  # fmt: skip
     setup = setup_policy(
         n_players, setup_depth=setup_depth,
@@ -178,6 +180,7 @@ class GNNBackend:
         setup_depth: int = 1,
         setup_temperature: float = 2.0,
         setup_beam: int = 4,
+        expected_rolls: bool = True,
         chance_nodes: bool = False,
         dev_chance: bool = True,
         ordered: bool = False,
@@ -187,6 +190,7 @@ class GNNBackend:
         self.setup_depth = setup_depth
         self.setup_temperature = setup_temperature
         self.setup_beam = setup_beam
+        self.expected_rolls = expected_rolls
         self.chance_nodes = chance_nodes
         self.dev_chance = dev_chance
         self.ordered = ordered
@@ -213,8 +217,8 @@ class GNNBackend:
             max_num_considered_actions=max_num_considered_actions,
             setup_depth=self.setup_depth,
             setup_temperature=self.setup_temperature, setup_beam=self.setup_beam,
-            chance_nodes=self.chance_nodes, dev_chance=self.dev_chance,
-            ordered=self.ordered,
+            expected_rolls=self.expected_rolls, chance_nodes=self.chance_nodes,
+            dev_chance=self.dev_chance, ordered=self.ordered,
         )  # fmt: skip
 
     def observe(
@@ -305,10 +309,30 @@ def _eval(net: BoardGNN, item: GNNItem) -> Metrics:
     logp = _masked_logp(logits, msk)  # over legal actions only
     p = jnp.where(msk > 0, jnp.exp(logp), 0.0)
     legal = jnp.where(msk > 0, p * logp, 0.0)
+    # How much the search still improves on the raw net policy, over full-search
+    # targets only (a playout-cap fast target is not that quantity).
+    target = item.policy
+    full = jnp.asarray(item.train_policy, jnp.float32)
+    n_full = jnp.maximum(jnp.sum(full), 1.0)
+    agree = (jnp.argmax(logp, -1) == jnp.argmax(target, -1)).astype(jnp.float32)
+    # logp is -inf only where the target is 0; zero it there so the discarded
+    # `where` branch never forms 0 * inf.
+    safe_logp = jnp.where(target > 0, logp, 0.0)
+    kl = jnp.sum(
+        jnp.where(
+            target > 0,
+            target * (jnp.log(jnp.clip(target, 1e-30, 1.0)) - safe_logp),
+            0.0,
+        ),
+        -1,
+    )
     return {
         "val_policy_loss": -jnp.mean(
             jnp.sum(jnp.where(msk > 0, item.policy * logp, 0.0), -1)
         ),
+        # search-vs-net convergence (0003's distill guard metrics)
+        "val_policy_top1_agree": jnp.sum(full * agree) / n_full,
+        "val_policy_kl": jnp.sum(full * kl) / n_full,
         "val_value_loss": jnp.mean(jax.nn.softplus(vs) - item.value * vs),
         "val_value_acc": jnp.mean((vs > 0).astype(jnp.float32) == item.value),
         # policy-head health: legal-set entropy (collapse -> ~0) + top prob.

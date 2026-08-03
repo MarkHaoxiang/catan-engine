@@ -46,6 +46,13 @@ def test_run_arena_uses_real_counts_for_elo_and_reports_se(monkeypatch: Any) -> 
     assert metrics["arena_elo"] == anchored_elo(real_inputs)
     assert metrics["arena_elo"] != anchored_elo(nominal_inputs)
     assert metrics["arena_elo_se"] == anchored_elo_se(real_inputs)
+    # the denominators behind those rates, so a run's Elo can be audited after
+    # the fact, plus each anchor's implied (single-anchor MLE) Elo -- the pooled
+    # number's disagreement across a rotating anchor set.
+    assert metrics["arena_episodes_lookahead"] == 50.0
+    assert metrics["arena_episodes_random"] == 20.0
+    assert metrics["arena_elo_vs_lookahead"] == anchored_elo([real_inputs[0]])
+    assert metrics["arena_elo_vs_random"] == anchored_elo([real_inputs[1]])
 
 
 def test_run_arena_opponent_every_skips_off_rounds(monkeypatch: Any) -> None:
@@ -75,7 +82,7 @@ def test_run_arena_opponent_every_skips_off_rounds(monkeypatch: Any) -> None:
         calls.clear()
         metrics = run_arena(backend, object(), cfg, seed=0, round_index=round_index)
         assert calls == ["lookahead"]
-        assert "arena_vs_random" not in metrics
+        assert not [k for k in metrics if k.endswith("_random")]
         assert metrics["arena_elo"] == anchored_elo([(0.0, 30.0, 50)])
         assert metrics["arena_elo_se"] == anchored_elo_se([(0.0, 30.0, 50)])
 
@@ -138,6 +145,8 @@ def test_run_arena_net_opponent_joins_metrics_and_elo(monkeypatch: Any) -> None:
     inputs = [(0.0, 30.0, 50), (-100.0, 24.0, 40)]
     assert metrics["arena_winrate"] == 0.6
     assert metrics["arena_vs_az0"] == 0.6
+    assert metrics["arena_episodes_az0"] == 40.0
+    assert metrics["arena_elo_vs_az0"] == anchored_elo([inputs[1]])
     assert metrics["arena_elo"] == anchored_elo(inputs)
     assert metrics["arena_elo_se"] == anchored_elo_se(inputs)
     assert seeds["lookahead"] == 7  # registry base, untouched

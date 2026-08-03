@@ -80,7 +80,8 @@ def search_semantics() -> dict[str, object]:
     """The frozen arena + search settings az0 plays the calibration at, read
     straight from this framework's conf so this can't drift from what the
     config change pins: ``conf/arena/scale.yaml``'s ``sims``/``considered`` and
-    ``conf/search/scale.yaml``'s ``chance_nodes``/``dev_chance``/``ordered``."""
+    ``conf/search/scale.yaml``'s
+    ``expected_rolls``/``chance_nodes``/``dev_chance``/``ordered``."""
     arena = OmegaConf.to_container(
         OmegaConf.load(_ALPHAZERO_DIR / "conf" / "arena" / "scale.yaml")
     )
@@ -91,6 +92,7 @@ def search_semantics() -> dict[str, object]:
     return {
         "sims": int(arena["sims"]),
         "considered": int(arena["considered"]),
+        "expected_rolls": bool(search["expected_rolls"]),
         "chance_nodes": bool(search["chance_nodes"]),
         "dev_chance": bool(search["dev_chance"]),
         "ordered": bool(search["ordered"]),
@@ -101,6 +103,7 @@ def az0_spec(
     *,
     sims: int,
     considered: int,
+    expected_rolls: bool,
     chance_nodes: bool,
     dev_chance: bool,
     ordered: bool,
@@ -125,7 +128,8 @@ def az0_spec(
         netcfg, setup_depth=NET_OPPONENT_SETUP_DEPTH,
         setup_temperature=NET_OPPONENT_SETUP_TEMPERATURE,
         setup_beam=NET_OPPONENT_SETUP_BEAM,
-        chance_nodes=chance_nodes, dev_chance=dev_chance, ordered=ordered,
+        expected_rolls=expected_rolls, chance_nodes=chance_nodes,
+        dev_chance=dev_chance, ordered=ordered,
     )  # fmt: skip
     agent = backend.play_agent(
         net, num_simulations=sims, max_num_considered_actions=considered
@@ -234,6 +238,7 @@ def _spec(name: str, semantics: dict[str, object]) -> OpponentSpec:
         return az0_spec(
             sims=int(semantics["sims"]),  # type: ignore[call-overload]
             considered=int(semantics["considered"]),  # type: ignore[call-overload]
+            expected_rolls=bool(semantics["expected_rolls"]),
             chance_nodes=bool(semantics["chance_nodes"]),
             dev_chance=bool(semantics["dev_chance"]),
             ordered=bool(semantics["ordered"]),
